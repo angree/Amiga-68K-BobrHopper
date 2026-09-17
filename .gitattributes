@@ -1,0 +1,5 @@
+# Shell scripts and AmigaDOS scripts must keep LF line endings: a CR breaks sh, and on the Amiga a CR becomes
+# part of the last word of the line (a file name, a command).
+*.sh text eol=lf
+winuae/work/* text eol=lf
+*.uae text eol=lf
