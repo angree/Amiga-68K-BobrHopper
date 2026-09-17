@@ -1,0 +1,8 @@
+; The HDF User-Startup runs Work:run at boot. It starts the test job runner and returns, so the boot carries on
+; to LoadWB and Workbench comes up behind whatever the runner starts.
+;
+; bhloop (build/amiga/bhloop.c) waits for Work:go and runs it - the machine is never restarted for a test,
+; because every WinUAE start steals the host mouse. It replaced a script loop that stopped after one job.
+Stack 1000000
+CD Work:
+Run >NIL: <NIL: Work:bhloop

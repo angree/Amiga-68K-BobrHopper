@@ -1,0 +1,79 @@
+; THE TEST MACHINE: a PLAIN 68020 without FPU, JIT OFF, throttled -80% - which the user set as the stand-in for an
+; 040's speed with an 020's instruction set ("020 no jit i -80% zeby zasymulowac predkosc 040 ale kompatybilnosc 020
+; bez fpu"). The previous file said 68040, which I chose on my own: it would have let 040-only code through.
+; cpu_speed=max with JIT measures the HOST; every fps number taken that way was worthless.
+;
+; BOTH DISPLAYS ARE PRESENT: AGA chipset and a uaegfx RTG board, so the choice made in BobrHopperPrefs is what
+; decides - the machine does not.
+config_description=Bobr Hopper - PURE AGA on a PLAIN 68020, no FPU (the target machine)
+; Adapted from the author's Amiga OpenXcom test machine. Every rule below cost
+; somebody a wasted test cycle, so they are carried over verbatim in spirit:
+;   - use_gui=no PLUS launching as "winuae-bh.exe -f <config>" boots straight into
+;     the emulation. Anything else opens the configuration window and waits for a
+;     human, which is the most common way to burn a test run.
+;   - win32.posx/posy must be set, and run_bh.ps1 also rewrites MainPosX/Y in
+;     winuae.ini: WinUAE 2.8.1 reopens where the ini remembers, and a DirectDraw
+;     window created on a secondary monitor comes up BLACK for every capture.
+;   - JIT ON (cachesize) is for turnaround only. Any timing claim about real
+;     hardware must be made with JIT OFF (bh-aga-nojit.uae).
+;
+; RUNTIME LIVES ON THE SSD (C:\temp\amiga_bobr), NOT IN THE REPOSITORY: the repo
+; is on a NAS, and WinUAE mounting a directory filesystem across it is the prime
+; suspect for stalls during boot. Our own private copy of the emulator lives
+; there too (uae\winuae-bh.exe), so no other Amiga project of the user's is
+; touched by anything we do.
+;
+; --- CPU: PLAIN 68020, NO FPU. This is the architecture the port targets.
+;     The game will want a faster CPU than this in practice, but every decision
+;     (16.16 fixed point, sprites instead of polygons) is made for THIS. ---
+cpu_type=68020
+cpu_model=68020
+fpu_model=0
+cpu_compatible=false
+cpu_24bit_addressing=false
+cpu_speed=max
+cpu_throttle=-800.0
+cachesize=0
+; --- Chipset: A4000 AGA ---
+chipset=aga
+chipset_compatible=A4000
+chipmem_size=4
+fastmem_size=0
+z3mem_size=32
+; --- Kickstart 3.1 (A4000, 40.70) ---
+kickstart_rom_file=C:\temp\amiga_bobr\ROM3.1_A4000.40.70.ROM
+; --- Boot: plain AGA Workbench 3.1, mounted READ-ONLY. The game writes only to
+;     PROGDIR: (Work:), so this is enforced rather than trusted. ---
+hardfile2=ro,DH0:C:\temp\amiga_bobr\boot.hdf,32,1,2,512,0,,uae
+; --- WORK: the shared folder. Binaries, data and logs are swapped here from the
+;     host without ever touching the HDF image. ---
+filesystem2=rw,WORK:Work:C:\temp\amiga_bobr\work,-128
+; --- An RTG board as well (see the top): the game opens AGA or RTG as BobrHopperPrefs says. ---
+gfxcard_type=uaegfx
+gfxcard_size=16
+; --- Display: Direct3D (gfx_api=1).
+;     It was DirectDraw, on the theory that PrintWindow capture needs it. Measured: with DirectDraw the window
+;     photographs BLACK through PrintWindow *and* through a desktop copy, three times running, while the game
+;     underneath is plainly alive (WinUAE's own status bar shows 50 fps and 100% CPU). So DirectDraw bought
+;     nothing and cost the only way to see what Intuition draws OUTSIDE our chunky buffer - the screen bar and
+;     the border. The game's own frame dump remains the primary evidence either way. ---
+gfx_api=1
+gfx_width_windowed=800
+gfx_height_windowed=600
+gfx_fullscreen_amiga=false
+win32.posx=100
+win32.posy=60
+; --- Mouse: magic mouse ON, so the host pointer is NOT captured and stays usable
+;     outside the emulator window. ---
+magic_mouse=true
+magic_mousecursor=1
+input.mouse_speed=100
+; --- Boot straight into emulation ---
+use_gui=no
+show_leds=true
+sound_output=normal
+sound_channels=stereo
+sound_frequency=44100
+sound_interpol=none
+sound_filter=emulated
+sound_stereo_separation=10

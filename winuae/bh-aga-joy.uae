@@ -1,0 +1,66 @@
+config_description=Bobr Hopper - AGA with a JOYSTICK IN THE GAME PORT (task B5/G8)
+; The same machine as bh-aga.uae, with one difference that matters: PORT 1 HOLDS A JOYSTICK.
+;
+; WHY THIS CONFIG EXISTS. The port's joystick code opened lowlevel.library and read the game port every frame,
+; and the log said so - but that line is equally true of a machine with nothing plugged in, so it proved
+; nothing at all. It could not: none of the bh-*.uae configs had a single `joyport` line, so ReadJoyPort(1)
+; had no controller to report. "Nobody moved a stick" was therefore not even the first problem; there was no
+; stick to move.
+;
+; MEASURED, and not what this file first claimed: with joyport1=kbd1 the port reports type $40000000, which
+; libraries/lowlevel.h calls JP_TYPE_UNKNOWN - a device the OS cannot identify - and NOT JP_TYPE_JOYSTK
+; ($30000000). An idle digital stick can read exactly like that, because electrically it is indistinguishable
+; until something is pushed. So this config proves the machine offers a port and the game reads it; it does not
+; by itself turn the type into "a joystick".
+;
+; (The first version of this comment asserted the opposite. It was written before the run, and the run said
+; otherwise - which is the whole reason the game now logs the raw value and its type name.)
+;
+; WHAT THIS STILL DOES NOT PROVE, and must not be written up as if it did: that a DEFLECTION reaches the game.
+; kbd1 maps the emulator's numeric keypad onto the port, and pressing those keys would mean synthesising input
+; on the HOST - which this project forbids outright, after a synthetic click once landed in the user's browser.
+; The decoding itself is proved instead by bh_joy_selftest(), which runs a known push/hold/release/fire
+; sequence through the same function the hardware path uses. The last step - a person's hand on a stick -
+; stays honestly unverified.
+;
+; Everything below is bh-aga.uae verbatim; only the joyport lines at the end are new.
+cpu_type=68020
+cpu_model=68020
+fpu_model=0
+cpu_compatible=false
+cpu_24bit_addressing=false
+cpu_speed=max
+cpu_throttle=0.0
+cachesize=8192
+chipset=aga
+chipset_compatible=A4000
+chipmem_size=4
+fastmem_size=0
+z3mem_size=32
+kickstart_rom_file=C:\temp\amiga_bobr\ROM3.1_A4000.40.70.ROM
+hardfile2=ro,DH0:C:\temp\amiga_bobr\boot.hdf,32,1,2,512,0,,uae
+filesystem2=rw,WORK:Work:C:\temp\amiga_bobr\work,-128
+gfx_api=1
+gfx_width_windowed=800
+gfx_height_windowed=600
+gfx_fullscreen_amiga=false
+win32.posx=100
+win32.posy=60
+magic_mouse=true
+magic_mousecursor=1
+input.mouse_speed=100
+use_gui=no
+show_leds=true
+sound_output=normal
+sound_channels=stereo
+sound_frequency=44100
+sound_interpol=none
+sound_filter=emulated
+sound_stereo_separation=10
+; --- THE POINT OF THIS FILE. Port 0 keeps the mouse (Intuition needs it); port 1 gets a joystick driven by the
+;     numeric keypad, exactly as the sibling OpenTTD port's configs do it. autofire off: the game reads edges,
+;     and an autofiring button would manufacture presses nobody made. ---
+joyport0=mouse
+joyport0autofire=none
+joyport1=kbd1
+joyport1autofire=none

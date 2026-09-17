@@ -1,0 +1,49 @@
+config_description=Bobr Hopper - RTG (uaegfx / Picasso96), plain 68020, no FPU, JIT OFF (honest RTG timing)
+; Identical to bh-rtg.uae except cachesize=0, exactly as bh-aga-nojit.uae is identical to bh-aga.uae.
+;
+; WHY IT EXISTS (task E5). The port draws through two completely different paths: on AGA every dirty rectangle
+; goes through Kalms' chunky-to-planar, on RTG the chunky buffer IS the display format and a blit is a row of
+; memcpy. Which one costs more on a real 68020 is a fair question, and the answer so far came from machines with
+; JIT ON - where the CPU is not being emulated instruction by instruction, so the ratio between "CPU work" (c2p)
+; and "memory work" (the copy) is not the ratio real hardware would see. A number measured with JIT on says
+; nothing about a real Amiga, which is the whole reason bh-aga-nojit.uae exists.
+;
+; So: compare THIS against bh-aga-nojit.uae, same binary, same autoplay run, same number of logic steps. Nothing
+; else may differ, or the comparison measures the difference between two machines instead of two draw paths.
+cpu_type=68020
+cpu_model=68020
+fpu_model=0
+cpu_compatible=false
+cpu_24bit_addressing=false
+cpu_speed=max
+cpu_throttle=0.0
+; --- THE ONLY LINE THAT DIFFERS FROM bh-rtg.uae ---
+cachesize=0
+chipset=aga
+chipset_compatible=A4000
+chipmem_size=4
+fastmem_size=0
+z3mem_size=32
+kickstart_rom_file=C:\temp\amiga_bobr\ROM3.1_A4000.40.70.ROM
+hardfile2=ro,DH0:C:\temp\amiga_bobr\boot.hdf,32,1,2,512,0,,uae
+filesystem2=rw,WORK:Work:C:\temp\amiga_bobr\work,-128
+; --- The RTG board: this is what makes the display code take the LUT8 path instead of c2p ---
+gfxcard_type=uaegfx
+gfxcard_size=16
+gfx_api=0
+gfx_width_windowed=800
+gfx_height_windowed=600
+gfx_fullscreen_amiga=false
+win32.posx=100
+win32.posy=60
+magic_mouse=true
+magic_mousecursor=1
+input.mouse_speed=100
+use_gui=no
+show_leds=true
+sound_output=normal
+sound_channels=stereo
+sound_frequency=44100
+sound_interpol=none
+sound_filter=emulated
+sound_stereo_separation=10

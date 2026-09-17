@@ -1,0 +1,106 @@
+RANGI TRYBU PROGRESSION / PROGRESSION MODE RANKS
+Poprawiaj smialo: jedna linia = jeden poziom. Format: poziom | English | Polski
+(Po zapisaniu napisz mi, ze skonczyles - przeczytam ten plik i wezme Twoje wersje.)
+
+CO SIE ZMIENILO: rangi byly pisane pod kurczaka (jajko, pioro, dziob, kurnik). Teraz bohaterem jest
+bobr, a kurczak jest jedna z postaci - wiec nazwy musza pasowac do obu. Ponizej lista po zmianie,
+a pod nia zestawienie "bylo -> jest" tam, gdzie cos ruszylem. Humor zostaje.
+
+
+=== Swiat 1: lamerskie ===
+1-1 | Speed Bump             | Prog Zwalniajacy
+1-2 | Road Snack             | Przekaska dla Tira
+1-3 | Professional Tree Hugger | Zawodowy Przytulacz Drzew
+1-4 | Accidental Pedestrian  | Przypadkowy Przechodzien
+1-5 | Almost Roadkill        | Prawie Rozjechany
+
+=== Swiat 2: juz lepiej ===
+2-1 | Puddle Jumper          | Skoczek przez Kaluze
+2-2 | Log Surfer Trainee     | Stazysta na Klodzie
+2-3 | Crosswalk Rookie       | Swiezak na Pasach
+2-4 | Bumper Dodger          | Unikacz Zderzakow
+2-5 | Critter with a Plan    | Zwierzak z Planem
+
+=== Swiat 3: z szacunkiem ===
+3-1 | Traffic Whisperer      | Zaklinacz Ruchu
+3-2 | Lily Pad Captain       | Kapitan Lilii
+3-3 | Rail Dancer            | Tancerz na Torach
+3-4 | Roadside Ninja         | Ninja z Pobocza
+3-5 | Crossing Veteran       | Weteran Przejsc
+
+=== Swiat 4: powazny gracz ===
+4-1 | Asphalt Acrobat        | Akrobata Asfaltu
+4-2 | River Tamer            | Pogromca Rzeki
+4-3 | Train Teaser           | Ten, co Drazni Pociagi
+4-4 | Sergeant Snout         | Sierzant Ryjek
+4-5 | Boss of the Street     | Szef Ulicy
+
+=== Swiat 5: dowodca ===
+5-1 | Highway Hero           | Bohater Autostrady
+5-2 | Captain Crossroads     | Kapitan Skrzyzowanie
+5-3 | Lord of the Logs       | Wladca Klod
+5-4 | Major Mayhem           | Major Zamieszanie
+5-5 | Commander of Crossings | Komendant Przejsc
+
+=== Swiat 6: postrach drog ===
+6-1 | Iron Nerve             | Zelazne Nerwy
+6-2 | Storm on Legs          | Burza na Nozkach
+6-3 | General Gridlock       | General Korek
+6-4 | Drivers' Nightmare     | Postrach Kierowcow
+6-5 | Master of the Road     | Mistrz Drogi
+
+=== Swiat 7: legenda ===
+7-1 | Legend of the Lane     | Legenda Pasa
+7-2 | Myth of the Motorway   | Mit Autostrady
+7-3 | Golden Step            | Zloty Krok
+7-4 | Supreme Crosser        | Najwyzszy Przechodzien
+7-5 | The One Who Crossed    | Ten, Ktory Przeszedl
+
+=== 8-1 i dalej: jedna ranga maksymalna ===
+8-1+ | Unkillable Legend     | Niesmiertelna Legenda
+
+
+=====================================================================
+ZESTAWIENIE: BYLO -> JEST (tylko zmienione, 12 z 36)
+=====================================================================
+
+1-1 | Egg on Legs           -> Speed Bump             | Jajko na nozkach   -> Prog Zwalniajacy
+      bobr sie nie wykluwa; "prog zwalniajacy" to zart z tego, czym jest zwierzak na drodze
+
+1-5 | Almost a Chicken      -> Almost Roadkill        | Prawie kurczak     -> Prawie Rozjechany
+      ta sama pointa, ale dziala dla kazdej postaci
+
+2-5 | Chicken with a Plan   -> Critter with a Plan    | Kurczak z planem   -> Zwierzak z Planem
+
+3-4 | Feathered Ninja       -> Roadside Ninja         | Pierzasty ninja    -> Ninja z Pobocza
+      bobr nie ma pior
+
+4-4 | Sergeant Cluck        -> Sergeant Snout         | Sierzant Ko-Ko     -> Sierzant Ryjek
+      gdakanie bylo tylko kurze; ryjek/pyszczek ma kazde zwierze
+
+5-4 | Major Plume           -> Major Mayhem           | Major Pioropusz    -> Major Zamieszanie
+
+5-5 | Coop Commander        -> Commander of Crossings | Komendant kurnika  -> Komendant Przejsc
+      kurnik zastapiony tym, o co w grze chodzi
+
+6-1 | Iron Beak             -> Iron Nerve             | Zelazny Dziob      -> Zelazne Nerwy
+      dziob jest kurzy, zeby bobrze - nerwy ma kazdy
+
+6-2 | Feather Storm         -> Storm on Legs          | Burza pior         -> Burza na Nozkach
+      "na nozkach" zostaje z dawnej rangi 1-1, zeby zart nie przepadl
+
+6-3 | General Egg-cellent   -> General Gridlock       | General Jajecznica -> General Korek
+
+7-1 | Legend of the Coop    -> Legend of the Lane     | Legenda kurnika    -> Legenda Pasa
+
+7-3 | Golden Wings          -> Golden Step            | Zlote Skrzydla     -> Zloty Krok
+      skrzydla ma tylko kurczak
+
+8-1+| Immortal Rooster      -> Unkillable Legend      | Niesmiertelny Kogut -> Niesmiertelna Legenda
+
+BEZ ZMIAN zostaly 24 rangi, ktore i tak pasuja do obu: Przekaska dla Tira, Przytulacz Drzew,
+Przypadkowy Przechodzien, Skoczek przez Kaluze, Stazysta na Klodzie (bobr wrecz lepiej), Swiezak na
+Pasach, Unikacz Zderzakow, Zaklinacz Ruchu, Kapitan Lilii, Tancerz na Torach, Weteran Przejsc,
+Akrobata Asfaltu, Pogromca Rzeki, Ten co Drazni Pociagi, Szef Ulicy, Bohater Autostrady, Kapitan
+Skrzyzowanie, Wladca Klod, Postrach Kierowcow, Mistrz Drogi, Mit Autostrady, Najwyzszy Przechodzien,
+Ten Ktory Przeszedl.

@@ -1,0 +1,19 @@
+# build output
+/out/
+*.o
+
+# release archives are attached to GitHub releases, not committed
+/release/*
+!/release/README.md
+
+# CyberGraphX developer headers: (c) phase5, not redistributable - supply your own
+/src/amiga/cgx-include/
+
+# emulator and test leftovers
+winuaelog.txt
+*.raw
+*.pal
+bh.log
+
+__pycache__/
+*.pyc
