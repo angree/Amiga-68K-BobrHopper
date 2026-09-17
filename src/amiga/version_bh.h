@@ -3,6 +3,6 @@
 #ifndef BH_VERSION_H
 #define BH_VERSION_H
 
-#define BH_VERSION "v011"
+#define BH_VERSION "v012"
 
 #endif

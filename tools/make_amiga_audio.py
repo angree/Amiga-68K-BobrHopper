@@ -30,12 +30,53 @@ The runtime keeps this in FAST RAM and copies a sound into a small chip-RAM buff
 the bytes Paula is actually fetching need to be in chip, and chip is the scarce, slow memory.
 """
 import argparse
+import array
 import os
 import struct
+import subprocess
 import sys
 
 PAL_CLOCK = 3546895
+# SOUNDS THIS BUILD REPLACES. assets_extra/sounds/amiga/<name>.(mp3|wav) is used instead of the shared
+# data_sf2000/sounds/<name>.snd - the way a sound is tried on the Amiga first (the user's level-crossing bell,
+# 17.09.2026) without changing what the SF2000 and R36S builds play. When one is accepted, the file moves up to
+# assets_extra/sounds/ and every port gets it.
+OVERRIDE_DIR = os.path.join("assets_extra", "sounds", "amiga")
+PEAK = 0.97  # the same normalisation tools/bake_audio.py applies to every other sound
 MIN_PERIOD = 124  # below this the hardware cannot fetch fast enough
+
+
+def read_media(path, rate):
+    """Any audio file -> mono samples at `rate`, normalised like tools/bake_audio.py does."""
+    pcm = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar", str(rate), "-f", "s16le", "-acodec", "pcm_s16le", "-"],
+        check=True, capture_output=True).stdout
+    samples = array.array("h")
+    samples.frombytes(pcm[:len(pcm) // 2 * 2])
+    if sys.byteorder == "big":
+        samples.byteswap()
+    peak = max((abs(s) for s in samples), default=0)
+    if peak:
+        gain = PEAK * 32767.0 / peak
+        if abs(gain - 1.0) >= 0.01:
+            for i, v in enumerate(samples):
+                x = int(v * gain)
+                samples[i] = -32768 if x < -32768 else 32767 if x > 32767 else x
+    return list(samples)
+
+
+def overrides(rate):
+    """{name: samples} for every file in assets_extra/sounds/amiga."""
+    out = {}
+    if not os.path.isdir(OVERRIDE_DIR):
+        return out
+    for f in sorted(os.listdir(OVERRIDE_DIR)):
+        name, ext = os.path.splitext(f)
+        if ext.lower() not in (".mp3", ".wav", ".mpeg", ".ogg", ".flac"):
+            continue
+        out[name] = read_media(os.path.join(OVERRIDE_DIR, f), rate)
+        print("override: %s from %s (%.3f s)" % (name, f, len(out[name]) / float(rate)))
+    return out
 
 
 def read_snd(path):
@@ -97,19 +138,26 @@ def main():
     if not names:
         sys.exit("no .snd files in %s" % src_dir)
 
+    replaced = overrides(args.rate)
     blobs, periods, kept = [], [], []
     for name in names:
-        rate, samples = read_snd(os.path.join(src_dir, name + ".snd"))
-        if rate is None:
-            print("skipping %s: not a CRS1 file" % name)
-            continue
-        samples = resample(samples, rate, args.rate)
+        if name in replaced:
+            samples = replaced.pop(name)
+        else:
+            rate, samples = read_snd(os.path.join(src_dir, name + ".snd"))
+            if rate is None:
+                print("skipping %s: not a CRS1 file" % name)
+                continue
+            samples = resample(samples, rate, args.rate)
         pcm = to_signed8(samples)
         if len(pcm) % 2:
             pcm += b"\x00"  # Paula counts words
         blobs.append(pcm)
         periods.append(period)
         kept.append(name)
+
+    for name in replaced:
+        print("WARNING: %s in %s replaces nothing - the game has no sound by that name" % (name, OVERRIDE_DIR))
 
     name_blob = bytearray()
     name_offsets = []

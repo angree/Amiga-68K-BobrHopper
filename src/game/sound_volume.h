@@ -12,7 +12,7 @@ inline mreal soundVolume(const std::string &name)
 {
     // O15: the crossing bell rings before every train and drowned everything else out (user report) - a third of
     // full volume is enough to warn
-    if (name == "train_alarm") return mreal(0.35f);
+    if (name == "train_alarm") return mreal(0.6f); // O21: the new bell (assets_extra/sounds/train_alarm.mp3) carries less, and the crossing has to be heard
     // O15: the hop sound is the one heard most often, so it sits under everything else at half volume
     if (name.compare(0, 12, "chicken_move") == 0 || name.compare(0, 11, "beaver_move") == 0) return mreal(0.5f);
     // O11.7: the fanfares of a finished Progression level are as loud as the train (O14: there are three of them)
