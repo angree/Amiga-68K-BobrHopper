@@ -30,7 +30,7 @@ Everything is 16.16 fixed point: the target is a plain **68020 with no FPU**.
 | CPU | 68020 or better, no FPU needed |
 | display | AGA (320x240), or an RTG board — Picasso96 / CyberGraphX (320x240 or 640x480) |
 | OS | Kickstart 3.0+ |
-| memory | about 1 MB chip (AGA) and 4 MB fast RAM; **10 MB** fast for 640x480 |
+| memory | about 1 MB chip (AGA) and 6 MB fast RAM; **12 MB** fast for 640x480 |
 | storage | a hard disk — the music is streamed while you play |
 
 Recommended:
