@@ -13,7 +13,7 @@ SW="src/sw/sw_math.cpp src/sw/raster.cpp src/sw/renderer_sw.cpp"
 SW_DEPS="src/engine/log.cpp src/engine/assets.cpp src/sf2000/platform_paths_sf2000.cpp"
 SW_SCENE="src/sw/scene_render_sw.cpp"
 # the HUD and screens (shared with the R36S build; real/mreal numbers)
-UI="src/engine/text.cpp src/ui/hud.cpp src/ui/screens.cpp src/ui/lang.cpp src/ui/ranks.cpp"
+UI="src/engine/text.cpp src/ui/hud.cpp src/ui/screens.cpp src/ui/lang.cpp src/ui/ranks.cpp src/ui/controls.cpp"
 # what the logic-only tools need
 LOGIC="$GAME src/engine/math.cpp src/engine/assets.cpp src/engine/log.cpp src/engine/gsap.cpp src/engine/platform_paths_sdl.cpp"
 
@@ -26,6 +26,8 @@ sources_for() {
     test_config) echo "tests/test_config.cpp src/engine/config.cpp" ;;
     test_easing) echo "tests/test_easing.cpp" ;;
     test_fixed) echo "tests/test_fixed.cpp" ;;
+    # O23: Input's per-device masks (a device must be only itself) and playerDevice
+    test_input) echo "tests/test_input.cpp src/engine/input.cpp src/ui/controls.cpp src/ui/screens.cpp src/ui/lang.cpp src/ui/ranks.cpp src/engine/log.cpp $GAME src/engine/math.cpp src/engine/assets.cpp src/engine/gsap.cpp src/engine/text.cpp src/engine/renderer.cpp src/engine/gl_api.cpp src/engine/platform_paths_sdl.cpp" ;;
     # SF2000 software renderer tests: build_pc.sh adds -DCR_FIXED for test_sw_*
     test_sw_math) echo "tests/test_sw_math.cpp $SW $SW_DEPS" ;;
     test_sw_raster) echo "tests/test_sw_raster.cpp $SW $SW_DEPS" ;;
@@ -40,7 +42,7 @@ sources_for() {
     sw_bake_amiga) echo "apps/sw_bake_amiga.cpp $SW src/engine/assets.cpp src/engine/log.cpp src/engine/png_write.cpp src/engine/math.cpp src/sf2000/platform_paths_sf2000.cpp" ;;
     test_audio) echo "tests/test_audio.cpp src/engine/audio.cpp src/engine/audio_sdl.cpp src/engine/stb_vorbis_impl.cpp src/engine/assets.cpp src/engine/log.cpp src/engine/platform_paths_sdl.cpp" ;;
     viewer) echo "apps/viewer.cpp $ENGINE" ;;
-    bobrhopper) echo "apps/bobrhopper.cpp $ENGINE $GAME src/game/scene_render.cpp src/ui/hud.cpp src/ui/debug_overlay.cpp src/ui/screens.cpp src/ui/lang.cpp src/ui/ranks.cpp" ;;
+    bobrhopper) echo "apps/bobrhopper.cpp $ENGINE $GAME src/game/scene_render.cpp src/ui/hud.cpp src/ui/debug_overlay.cpp src/ui/screens.cpp src/ui/lang.cpp src/ui/ranks.cpp src/ui/controls.cpp" ;;
     test_hop) echo "tests/test_hop.cpp $LOGIC" ;;
     trace) echo "apps/trace.cpp $LOGIC" ;;
     mapdump) echo "apps/mapdump.cpp $LOGIC" ;;

@@ -73,6 +73,13 @@ cp "$REPO/data_amiga/font.bhf" "$STAGE/data/"
 [ -f "$REPO/data_amiga/font640.bhf" ] || { echo "no data_amiga/font640.bhf - run tools/make_amiga_font.py --data data --sizes 12,14,18,32 --name font640.bhf"; exit 1; }
 cp "$REPO/data_amiga/sprites640.spr" "$STAGE/data/"
 cp "$REPO/data_amiga/font640.bhf" "$STAGE/data/"
+# O23: and the WIDE sets, one per resolution. Wide is what two players need (and what the View setting picks); the
+# game still holds exactly ONE container at a time and swaps it on the title screen. Both are SMALLER than their
+# normal counterparts - a wider view means smaller sprites - so nothing here raises the memory floor.
+for w in spriteswide.spr sprites640wide.spr; do
+    [ -f "$REPO/data_amiga/$w" ] || { echo "no data_amiga/$w - run sh build/bake_amiga.sh"; exit 1; }
+    cp "$REPO/data_amiga/$w" "$STAGE/data/"
+done
 [ -f "$REPO/data_amiga/sounds.bhs" ] && cp "$REPO/data_amiga/sounds.bhs" "$STAGE/data/"
 cp "$REPO/data_amiga/manifest.txt" "$STAGE/data/"
 cp "$REPO/data_amiga/meshes/"*.fmesh "$STAGE/data/meshes/"
@@ -84,6 +91,7 @@ Bobr Hopper - Amiga 68k
 
 A hopping game: cross the roads, the rivers and the railway without being run over.
 Classic (endless) and Progression (levels, a finish line, ranks), English and Polish.
+One or TWO players on one screen.
 
 REQUIREMENTS
   - 68020 or better, no FPU needed (the whole game is 16.16 fixed point)
@@ -101,8 +109,27 @@ SETTINGS BEFORE THE GAME STARTS - BobrHopperPrefs
   Resolution   320x240 (AGA and RTG) or 640x480 (RTG only)
   Screen bar   the Workbench title bar above the game: on or off
   From a Shell: BobrHopperPrefs GFX=RTG SCREEN=640x480 BAR=OFF   (SHOW prints them)
-  Everything else (sound, music, language, character, ...) is in the game's own
-  settings screen: press S on the title screen.
+  Everything else (sound, music, language, character, two players, ...) is in the
+  game's own settings screen: press S on the title screen. The list scrolls - a
+  small triangle appears when there is more above or below.
+
+TWO PLAYERS
+  Settings -> Players -> 2 PLAYERS, then give each player a device of its own:
+    ARROWS   cursor keys, Space or Return to hop forward
+    WSAD     W A S D, left Shift or Ctrl to hop forward
+    JOY 2    the joystick port (the lower socket - where a stick normally lives)
+    JOY 1    the mouse port; only read when a player has chosen it, because a
+             mouse in that socket would hop a hero about at random
+  The two share one screen, so the view widens by itself and the game loads a
+  second set of graphics for it (one set at a time - it says LOADING for a moment).
+  Every row then has at least TWO ways through, so neither player has to queue.
+  Land on the other player and you stand on its head; it walks out from under you
+  the moment it hops away.
+    CLASSIC is a DUEL - fall too far behind and you are out of the frame, and the
+      other one plays on. The higher score wins.
+    PROGRESSION is CO-OPERATIVE - nobody is left behind: the one in front is
+      pulled back onto the other's head, and a player who dies comes back on its
+      partner's head a couple of seconds later.
 
 CONTROLS
                  keyboard              joystick / CD32 pad

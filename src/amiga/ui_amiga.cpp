@@ -82,10 +82,17 @@ void Renderer::drawOverlayRect(mreal x, mreal y, mreal w, mreal h, mreal r, mrea
     }
     unsigned char *row = surface->pixels + (unsigned long)y0 * (unsigned long)surface->pitch;
     const int pitch = surface->pitch;
+    // FOUR STRIDED RUNS PER ROW, NOT A TEST PER PIXEL. The pattern repeats every four columns, so which of the four
+    // are painted is decided once per row and each is then written with a stride of four - no table read and no
+    // branch inside the loop. The settings screen at 640x480 is a 300000-pixel backdrop every frame, and the
+    // branchy version was most of the reason a MENU ran at 4 fps while the game ran at 23.
     for (int yy = y0; yy < y1; yy++, row += pitch) {
         const unsigned char *bayer = kBayer[yy & 3];
-        for (int xx = x0; xx < x1; xx++)
-            if (bayer[xx & 3] < level) row[xx] = index;
+        for (int k = 0; k < 4; k++) {
+            if (bayer[k] >= level) continue;
+            int xx = x0 + ((k - x0) & 3);
+            for (; xx < x1; xx += 4) row[xx] = index;
+        }
     }
 }
 
@@ -276,10 +283,20 @@ static void labelledBox(Renderer &r, int x, int y, int w, int h, bool alignRight
 // cr::Input, the one method this build uses. The class is the shared one (engine/input.h); its SDL half lives in
 // engine/input.cpp, which is not compiled here. The platform hands over a button mask per logic step through
 // setSynthetic() - the same road the SF2000 core and the bots use - and this latches it.
+// The Amiga's own Input::step. The shared engine/input.cpp is an SDL file - it is not built here - so this is the
+// whole of it: the platform has already folded the keyboard and the joysticks into masks, and setSynthetic carries
+// the one every menu reads. O23 added the per-device masks, and they have to be latched HERE too; forgetting that
+// is why a two-player run sat on the starting row while the bot pressed buttons nobody was listening to.
 void Input::step()
 {
     prev_ = cur_;
     cur_ = synthetic_;
+    devCur_[0] = cur_;
+    devPrev_[0] = prev_;
+    for (int d = 1; d < kInputDevices; d++) {
+        devPrev_[d] = devCur_[d];
+        devCur_[d] = devSet_[d]; // a device is only itself - see the note in src/engine/input.cpp
+    }
 }
 
 } // namespace cr

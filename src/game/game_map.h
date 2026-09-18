@@ -41,7 +41,8 @@ public:
     void reset();
     void init(GameContext &ctx);
     void newRow(GameContext &ctx);
-    void tick(GameContext &ctx, Player &player);
+    // O23: one tick for every player. The rows move their cars, logs and trains once and then test each player.
+    void tick(GameContext &ctx, Player *players, int count);
 
     // getRow(index): floorMap[`${index}`] -- only exact integers ever match
     const RowRef *getRow(real index) const;

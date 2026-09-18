@@ -22,9 +22,13 @@ set -e
 
 TARGET="${1:-probe}"
 
-REPO=$(cd "$(dirname "$0")/.." && pwd)
-WORK="$HOME/build-bobr"
-DEPLOY=/mnt/c/temp/amiga_bobr/work
+# The three paths are overridable so the SAME script can build another checkout - which is how a performance claim
+# gets an A/B instead of a memory. BH_REPO points at the sources, BH_WORK at a build directory of its own (sharing
+# one would link the other tree's stale objects: that is exactly what happened the first time), BH_DEPLOY at where
+# the binary lands.
+REPO="${BH_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
+WORK="${BH_WORK:-$HOME/build-bobr}"
+DEPLOY="${BH_DEPLOY:-/mnt/c/temp/amiga_bobr/work}"
 export PATH=/opt/amiga/bin:/usr/local/bin:/usr/bin:/bin
 
 :
@@ -141,7 +145,7 @@ game)
     # lang::t(), and ranks.cpp is the generated rank list. Using them rather than retyping the words is what keeps
     # the Amiga's menus word-for-word identical to the SF2000 and R36S ones, Polish letters included.
     echo "=== compiling the shared text (lang, ranks)"
-    for f in lang ranks screens hud; do
+    for f in lang ranks screens hud controls; do
         cxx_ice_ladder "$WORK/src/ui/$f.cpp" "$WORK/obj/ui_$f.o" || exit 1
         OBJS="$OBJS $WORK/obj/ui_$f.o"
     done

@@ -10,6 +10,7 @@
 #include "engine/input.h"
 #include "engine/renderer.h"
 #include "engine/text.h"
+#include "ui/lang.h"
 
 namespace cr {
 
@@ -44,6 +45,10 @@ struct UserSettings {
     int framing = 0;   // 0 normal (view scale 3), 1 wide (3.5)
     int character = 0; // 7.1: index into kCharacters
     int language = 0;  // O11.5: 0 English, 1 Polish (ui/lang.h)
+    // O23: how many play, and which input device each of them uses. The devices are the platform's own - the app
+    // hands their names to Screens::controlNames - so this screen works the same on a keyboard and on a console.
+    int players = 1;
+    int control[2] = {0, 1};
 };
 
 struct MenuResult {
@@ -55,6 +60,13 @@ struct MenuResult {
 };
 
 enum class Menu { None, Pause, Settings };
+
+// O23: the settings screen is a SCROLLING list now - the two control entries do not fit on one screenful, and the
+// user asked for exactly this ("musimy chyba zrobic przewijane menu"). The order is the order they are shown in.
+enum SettingsItem {
+    SetPlayers, SetControl1, SetControl2, SetSounds, SetMusic, SetView, SetLanguage, SetCharacter, SetShadows,
+    SetFps, SetBack, SetItemCount
+};
 
 class Screens {
 public:
@@ -83,6 +95,10 @@ public:
     int careerLevel = 1;
     // shown small in the corner of the home screen when set (the SF2000 build: the user tests by version number)
     std::string versionLabel;
+    // O23: the input devices this platform offers, in the order the settings screen steps through them (for example
+    // ARROWS, WSAD, JOY 1, JOY 2). Left null on a platform with one device, and the control entries then vanish.
+    const char *const *controlNames = nullptr;
+    int controlCount = 0;
 
 private:
     void drawHome(Renderer &renderer, TextRenderer &text, int screenW, int screenH);
@@ -93,6 +109,13 @@ private:
     void drawMenuBars(Renderer &renderer, TextRenderer &text, const std::string *labels, int count, int cursor, int w,
                       int top);
     bool handleHome(const Input &input, MenuResult &out);
+    // O23: which entries the settings screen shows right now (the second control only with two players, and no
+    // control entries at all when the platform offers one device); returns how many
+    int settingsItems(const UserSettings &s, SettingsItem *out) const;
+    // how many rows of the list fit between the title and the hint line
+    static int visibleRows(int h);
+    static lang::Str settingsLabel(SettingsItem item);
+    std::string settingsValue(SettingsItem item, const UserSettings &s) const;
 
     // O11.2/O11.4: what the home screen shows — the two modes, the career menu behind Progression, and the
     // confirmation New Game needs before the saved progress goes
@@ -101,6 +124,7 @@ private:
     Menu menu_ = Menu::None;
     bool settingsFromPause_ = false;
     int cursor_ = 0;
+    int scrollTop_ = 0; // O23: first list row on screen
     HomePage homePage_ = HomePage::Modes;
     int homeCursor_ = 0, careerCursor_ = 0, confirmCursor_ = 0;
     GpuTexture title_, buttonPlay_, buttonSettings_, buttonBack_;

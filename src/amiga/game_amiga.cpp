@@ -36,6 +36,7 @@
 #include "game/sound_volume.h"
 #include "ui/hud.h"
 #include "ui/lang.h"
+#include "ui/controls.h"
 #include "ui/screens.h" // THE SHARED SCREENS: banners, pause, settings, career, ranks - unchanged
 
 extern "C" {
@@ -44,6 +45,7 @@ extern "C" {
 #include "blit.h"
 #include "clock_bh.h"
 #include "prefs_bh.h"
+#include "ui_colours.h" // BH_UI_TEXT for the LOADING line drawn while a sprite set is swapped
 #include "version_bh.h"
 #include "joy_bh.h"
 #include "music_bh.h"
@@ -78,7 +80,23 @@ inline unsigned long profMicros() { return gProfiling ? (unsigned long)bh_micros
 // kernels work in 32-pixel columns.
 int gScreenW = 320, gScreenH = 240;
 int gPixelScale = 1;                          // 1 at 320x240, 2 at 640x480: every pixel constant below is times this
-inline int viewScaleFor(int screenW) { return 6 * 320 / screenW; } // 6 at 320 (the SF2000 framing), 3 at 640
+// O23 THE WIDE VIEW. Two players need more of the world in frame than one does, and the user also wanted it as a
+// setting of its own. It is a WHOLE SEPARATE SET OF SPRITES (build/bake_amiga.sh), because a sprite baked for one
+// scale cannot be stretched on a 68020 without either a blur or a cost; so there are four sets and exactly one of
+// them is in memory. Wide shows 7/6 more world, the same ratio the consoles use (3.0 -> 3.5 in settings.h).
+bool gWide = false;
+inline mreal viewScaleFor(int screenW) // 6 at 320 (the SF2000 framing), 3 at 640; times 7/6 when wide
+{
+    const mreal base = mreal(6 * 320 / screenW);
+    return gWide ? base * mreal(7) / mreal(6) : base;
+}
+// Which of the four containers a screen size and a framing need. The font does not change: the screens lay
+// themselves out in the same logical pixels either way.
+inline const char *spritePathFor(bool hires, bool wide)
+{
+    return hires ? (wide ? "PROGDIR:data/sprites640wide.spr" : "PROGDIR:data/sprites640.spr")
+                 : (wide ? "PROGDIR:data/spriteswide.spr" : "PROGDIR:data/sprites.spr");
+}
 constexpr int kSfxVolume = 48; // Paula's own scale is 0..64
 
 // Amiga raw key codes (RAWKEY): bit 7 set means the key came up.
@@ -206,7 +224,7 @@ public:
         inv.e[6] = zAxis.y;
         inv.e[10] = zAxis.z;
         viewRel_ = inv;
-        const mreal w = mreal(viewW_) * mreal(viewScaleFor(gScreenW)), h = mreal(viewH_) * mreal(viewScaleFor(gScreenW));
+        const mreal w = mreal(viewW_) * viewScaleFor(gScreenW), h = mreal(viewH_) * viewScaleFor(gScreenW);
         Mat4 proj = orthographic(-w, w, h, -h, settings::cameraNear, settings::cameraFar, settings::cameraZoom);
 
         // The same vertical framing as SF2000 and R36S. Those raise the picture by viewShift = -0.15 NDC so the
@@ -325,9 +343,16 @@ public:
             // THE HERO'S ROW. Between two rows he belongs to the NEARER one, or the near row's ground would be painted
             // over his feet. Once dead he stays in the row he died in - the game moves a body about (pushed to the
             // road's edge, carried by a car, sunk) and re-deriving the row from that made the corpse jump a line.
+            // O23: the same for both players. One can be dead and sinking while the other plays on, so "is the hero
+            // dead" has to be asked of the right one - which is what curHero_ carries down to the model below.
+            heroCount_ = game.playerCount() > 1 ? 2 : 1;
+            for (int i = 0; i < heroCount_; i++) {
+                const Player &hero = game.hero(i);
+                heroNode_[i] = hero.object;
+                heroDead_[i] = !hero.isAlive;
+            }
+            for (int i = heroCount_; i < 2; i++) heroNode_[i] = 0;
             const Player &hero = game.hero();
-            heroNode_ = hero.object;
-            heroDead_ = !hero.isAlive;
             // ROWS ARE COUNTED IN THE WORLD'S OWN SPACE, not the camera's. The world group slides continuously as the
             // camera eases after the hero, so a position rounded in the slid space changes row as it slides: the
             // finish line's squares sit at z = row +- 0.25 and hopped between two rows - and so between being
@@ -406,6 +431,9 @@ public:
     size_t drawn() const { return items_.size(); }
 
     void enableCensus() { census_ = true; }
+
+    /* O23: after a sprite swap the screen still holds the old set's pixels - wipe the next few frames. */
+    void forceClear() { needClear_ = 2; }
 
     void setDetail(bool on) { detail_ = on; }
 
@@ -498,9 +526,14 @@ private:
                 row = int((pos.z.v - worldZ_ + 32768) >> 16); // everything beneath belongs to this row
             }
         }
-        if (node == heroNode_) {
-            if (!heroDead_) heroRow_ = int((pos.z.v - worldZ_ + 3277) >> 16); // floor(z + 0.05), in the same space as the rows
-            row = heroRow_;
+        const int savedHero = curHero_;
+        for (int hi = 0; hi < heroCount_; hi++) {
+            if (node != heroNode_[hi]) continue;
+            // floor(z + 0.05), in the same space as the rows
+            if (!heroDead_[hi]) heroRow_[hi] = int((pos.z.v - worldZ_ + 3277) >> 16);
+            row = heroRow_[hi];
+            curHero_ = hi;
+            break;
         }
         // Not under a row and not the hero - particles, the finish squares: the row they are standing in.
         const int myRow = row != kNoRow ? row : int((pos.z.v - worldZ_ + 32768) >> 16);
@@ -515,6 +548,7 @@ private:
         }
         const size_t n = node->children.size();
         for (size_t i = 0; i < n; i++) walk(node->children[i], mine, pos, row);
+        curHero_ = savedHero;
     }
 
     // THE GAME'S PROCEDURAL GEOMETRY: flat-coloured planes and boxes with no model - the FINISH LINE of a
@@ -718,7 +752,7 @@ private:
         item.colour = 0;
         item.clipY = 0;
         item.layer = set.layer == 1 ? 0 : (set.layer == 2 || flat) ? 1 : 2;
-        if (set.hero && heroDead_) {
+        if (set.hero && curHero_ >= 0 && heroDead_[curHero_]) {
             // DROWNED. The game sinks the body below the water's surface (WaterRow: getPlayerSunkenPosition) and in
             // 3D the water hides what is under it. A sprite has no water to hide behind, so the whole bird hung
             // there turning slowly - "that is silly", said the user. The surface is a line on screen: nothing of
@@ -791,9 +825,13 @@ private:
     long worldZ_ = 0;
     int floorsDrawn_ = 0;
     int needClear_ = 2; // wipe the first frames; after that only when a sentinel says the sky is showing
-    const cr::Node *heroNode_ = 0;
-    bool heroDead_ = false;
-    int heroRow_ = 0;
+    // O23: up to two players. curHero_ says which one the node being walked belongs to (-1 for everything else),
+    // so a model deep inside a hero's group still knows whose it is.
+    const cr::Node *heroNode_[2] = {0, 0};
+    bool heroDead_[2] = {false, false};
+    int heroRow_[2] = {0, 0};
+    int heroCount_ = 1;
+    int curHero_ = -1;
     unsigned long colourKey_[16];
     unsigned char colourIndex_[16];
     int colourCount_ = 0;
@@ -933,6 +971,16 @@ struct Session {
     // be an invisible hero here. The settings entry therefore steps between the two.
     static const int kShippedCharacters = 2;
 
+    // O23: the devices a second player can be given here, in the order the settings screen steps through them.
+    // They are Input's devices 1..4 (ui/controls.cpp adds the one). The ports are named the way they are printed
+    // on the machine: the joystick socket is port 2, the mouse socket is port 1.
+    static const int kControlCount = 4;
+    static const char *const *controlNames()
+    {
+        static const char *const names[kControlCount] = {"ARROWS", "WSAD", "JOY 2", "JOY 1"};
+        return names;
+    }
+
     void loadSettings()
     {
         loadConf();
@@ -942,6 +990,12 @@ struct Session {
         settings.framing = clampInt(getInt("framing", 0), 0, 1);
         settings.language = clampInt(getInt("language", 0), 0, 1);
         settings.music = clampInt(getInt("music_volume", 22), 0, 100);
+        // O23: how many play and which device each of them uses (kControlNames below)
+        settings.players = clampInt(getInt("players", 1), 1, 2);
+        settings.control[0] = clampInt(getInt("control_p1", 0), 0, kControlCount - 1);
+        settings.control[1] = clampInt(getInt("control_p2", 2), 0, kControlCount - 1);
+        if (settings.control[1] == settings.control[0])
+            settings.control[1] = (settings.control[0] + 1) % kControlCount;
         const std::string character = conf.count("character") ? conf["character"] : std::string("beaver");
         for (int i = 0; i < kShippedCharacters; i++)
             if (character == kCharacters[i].id) settings.character = i;
@@ -959,6 +1013,9 @@ struct Session {
         setInt("framing", settings.framing);
         setInt("language", settings.language);
         setInt("music_volume", settings.music);
+        setInt("players", settings.players);
+        setInt("control_p1", settings.control[0]);
+        setInt("control_p2", settings.control[1]);
         conf["character"] = kCharacters[settings.character].id;
         if (game && game->highscore() > getInt("highscore", 0)) setInt("highscore", game->highscore());
         saveConf();
@@ -998,11 +1055,6 @@ struct Session {
         Game &g = *game;
         input.setSynthetic(mask);
         input.step();
-        static const struct {
-            Action act;
-            Swipe dir;
-        } dirs[] = {{ActUp, Swipe::Up}, {ActDown, Swipe::Down}, {ActLeft, Swipe::Left}, {ActRight, Swipe::Right},
-                    {ActA, Swipe::Up}};
         if (input.down(ActSelect) && (input.pressed(ActStart) || input.pressed(ActL))) selectCombo = true;
         const bool selectTap = input.released(ActSelect) && !selectCombo;
         if (input.released(ActSelect)) selectCombo = false;
@@ -1025,6 +1077,7 @@ struct Session {
         if (menu.quitToHome) g.quitToHome();
         if (menu.exitGame) quit = true;
         if (menu.startLevel >= 0 && !g.restarting()) {
+            g.setPlayerCount(settings.players); // O23: before the scene is built - the map and the start differ
             if (menu.resetCareer) {
                 careerLevel = 1;
                 screens.careerLevel = careerLevel;
@@ -1043,10 +1096,7 @@ struct Session {
                 if (input.pressed(ActStart) && !input.down(ActSelect)) {
                     screens.openPause();
                 } else {
-                    for (int i = 0; i < 5; i++) {
-                        if (input.pressed(dirs[i].act)) g.beginMoveWithDirection();
-                        if (input.released(dirs[i].act)) g.moveWithDirection(dirs[i].dir);
-                    }
+                    applyPlayerInput(input, settings, g); // O23: src/ui/controls.cpp, one player or two
                 }
                 break;
             case GameState::GameOver: {
@@ -1083,11 +1133,13 @@ struct Session {
             careerDirty = true;
         }
         if (pendingLevel > 0 && !g.restarting() && g.state() == GameState::None) {
+            g.setPlayerCount(settings.players);
             g.setLevel(pendingLevel);
             g.startPlaying();
             pendingLevel = 0;
         }
         if (pendingClassic && !g.restarting() && g.state() == GameState::None) {
+            g.setPlayerCount(settings.players);
             g.setLevel(0);
             g.startPlaying();
             pendingClassic = false;
@@ -1135,6 +1187,51 @@ uint16_t buttonForKey(int raw)
     case 0x21: case 0x42: return ActSelect;
     default: return 0;
     }
+}
+
+// O23 (two players): the keyboard as TWO devices, so two people can play on one Amiga. The arrows half is what
+// a single player has always used; the WSAD half is the second player's, with the left shift for its A button.
+// Both halves still feed the common mask through buttonForKey, so the menus answer to either of them.
+uint16_t arrowsForKey(int raw)
+{
+    switch (raw) {
+    case 0x4C: return ActUp;
+    case 0x4D: return ActDown;
+    case 0x4F: return ActLeft;
+    case 0x4E: return ActRight;
+    case 0x40: case 0x43: case 0x44: return ActA; // space, enter, return
+    case 0x41: return ActB;                       // backspace
+    default: return 0;
+    }
+}
+
+uint16_t wasdForKey(int raw)
+{
+    switch (raw) {
+    case 0x11: return ActUp;    // W
+    case 0x21: return ActDown;  // S
+    case 0x20: return ActLeft;  // A
+    case 0x22: return ActRight; // D
+    case 0x60: case 0x63: return ActA; // left shift, control
+    case 0x10: return ActB;            // Q
+    default: return 0;
+    }
+}
+
+// a joystick's held bits as the game's buttons (the same mapping the single-player build has used all along)
+uint16_t joyButtons(unsigned j, bool playing)
+{
+    uint16_t m = 0;
+    if (j & BH_JOY_UP) m |= ActUp;
+    if (j & BH_JOY_DOWN) m |= ActDown;
+    if (j & BH_JOY_LEFT) m |= ActLeft;
+    if (j & BH_JOY_RIGHT) m |= ActRight;
+    if (j & BH_JOY_FIRE) m |= ActA;
+    if (j & BH_JOY_FIRE2) m |= playing ? ActStart : ActB;
+    if (j & BH_JOY_PLAY) m |= ActStart;
+    if (j & BH_JOY_GREEN) m |= ActSelect;
+    if (j & BH_JOY_YELLOW) m |= ActB;
+    return m;
 }
 
 void dumpFrame(const BHSurface &s, const char *path)
@@ -1255,26 +1352,44 @@ struct AutoPlay {
      * without dragging in the SDL-shaped Input class.
      */
     cr::SmokeBot bot;
+    // O23: a second bot, seeded differently, so an unattended two-player run has the two hopping apart instead of
+    // in lockstep - which is what exercises the head-standing and the gap rules rather than hiding them.
+    cr::SmokeBot bot2;
     uint16_t maskPrev;
     bool progression = false, wentDown = false;
+    bool menuWalk = false; // "menu" in autoplay.txt: open the settings and step down the list, for screenshots
+    bool soloKeys = false; // "solo" in autoplay.txt: press the arrows only, and see that player two stays put
 
-    AutoPlay() : on(false), next(0), scripted(0), nextKey(120), hops(0), bot(1u), maskPrev(0)
+    AutoPlay() : on(false), next(0), scripted(0), nextKey(120), hops(0), bot(1u), bot2(7u), maskPrev(0)
     {
         FILE *f = fopen("PROGDIR:autoplay.txt", "r");
         if (f) {
             // "prog" in the file picks PROGRESSION from the title menu. Every unattended run before this one
             // started Classic, and the user found by playing that Progression draws nothing but grass.
             char word[8] = {0};
-            if (fscanf(f, "%7s", word) == 1 && word[0] == 'p') progression = true;
+            if (fscanf(f, "%7s", word) == 1) {
+                if (word[0] == 'p') progression = true;
+                // "menu" walks the SETTINGS list instead of playing: the screens at 640x480 had never been looked
+                // at, and there is no way to press a key from the host (that once typed into the user's browser).
+                if (word[0] == 'm') menuWalk = true;
+                // "solo" presses ONLY the arrows, exactly as a person at the keyboard would - the shared mask and
+                // the arrows device together, the WSAD device untouched. With two players only player one may
+                // move. It exists because the user found the opposite by playing, and no unattended run could
+                // have caught it: there the bot IS the shared mask, so both looked alike.
+                if (word[0] == 's') soloKeys = true;
+            }
             fclose(f);
-            on = true;
+            on = !menuWalk && !soloKeys;
             scripted = 1; // one press of A, to get past the title screen into a game
-            printf("game: autoplay is on - hopping by itself (%s)\n", progression ? "PROGRESSION" : "classic");
+            printf("game: autoplay is on - %s\n",
+                   menuWalk ? "walking the settings list" : progression ? "hopping by itself (PROGRESSION)"
+                                                                        : "hopping by itself (classic)");
         }
     }
 
-    /* The shared bot's button mask for this step (it presses A on the title screen by itself). */
-    uint16_t mask(Game &game)
+    /* The shared bot's button mask for this step (it presses A on the title screen by itself). `player` picks
+     * which bot answers: 0 for the first (and for the menus), 1 for the second player's. */
+    uint16_t mask(Game &game, int player = 0)
     {
         if (!on) return 0;
         // Stand on the game-over screen for four seconds first, so the frame dump shows the banners and the two
@@ -1287,7 +1402,7 @@ struct AutoPlay {
         } else {
             overSteps = 0;
         }
-        return bot.next(game.state());
+        return player == 1 ? bot2.next(game.state()) : bot.next(game.state());
     }
     int overSteps = 0;
 };
@@ -1338,10 +1453,24 @@ int main(void)
     // THE DISPLAY SETTINGS COME FIRST: they decide which set of sprites and which font is loaded - only ONE set
     // (the 640 sprites are four times the memory, and a 320 game has no use for them).
     const DisplayPrefs displayPrefs;
-    const char *const spritePath = displayPrefs.hires ? "PROGDIR:data/sprites640.spr" : "PROGDIR:data/sprites.spr";
+    // ...and so do the GAME's settings, because two players (or the wide view) need the wide set. They are read
+    // here, before anything is loaded, so that exactly one container ever reaches memory.
+    Session session;
+    session.loadSettings();
+    gWide = session.settings.players > 1 || session.settings.framing == 1;
+    const char *spritePath = spritePathFor(displayPrefs.hires != 0, gWide);
     const char *const fontPath = displayPrefs.hires ? "PROGDIR:data/font640.bhf" : "PROGDIR:data/font.bhf";
+    printf("sprites: %s (%s view, %d player%s)\n", spritePath, gWide ? "wide" : "normal", session.settings.players,
+           session.settings.players > 1 ? "s" : "");
     BHSprites sprites;
-    if (!bh_sprites_load(&sprites, spritePath)) return 20;
+    if (!bh_sprites_load(&sprites, spritePath)) {
+        // A machine upgraded from an older package has no wide containers. The normal set is always there, so the
+        // game starts in the normal view rather than refusing to run.
+        printf("sprites: %s missing - falling back to the normal view\n", spritePath);
+        gWide = false;
+        spritePath = spritePathFor(displayPrefs.hires != 0, false);
+        if (!bh_sprites_load(&sprites, spritePath)) return 20;
+    }
 
     // The game's own font - the same glyphs, Polish letters included, that every other port of this game
     // draws with. If it will not load the game still plays; the score line simply does not appear, which is
@@ -1407,17 +1536,18 @@ int main(void)
     text.font = &font;
     text.pixelScale = gPixelScale;
 
-    Session session;
     session.game = &game;
     session.board = &board;
     session.haveSounds = haveSounds;
     session.music = manifest.music;
-    session.loadSettings();
     session.applySettings();
     // The title picture's SIZE drives the shared layout; its pixels are the baked logo sprite (see the shim).
     if (!session.screens.load(ui, dataDir())) printf("screens: images/*.tex missing - the title has no logo box\n");
     session.screens.settings = &session.settings;
     session.screens.playSound = [&board](const std::string &name) { board.play(name); };
+    // O23: the devices this machine offers, so the settings screen can hand one to each player
+    session.screens.controlNames = Session::controlNames();
+    session.screens.controlCount = Session::kControlCount;
     game.setHighscore(session.getInt("highscore", 0));
     game.setCharacter(kCharacters[session.settings.character].id);
     // GameEngine.unpause() renders - and so ticks the engine - once before the frame loop (bobrhopper.cpp)
@@ -1510,18 +1640,75 @@ int main(void)
     bool trainCaught = false;
     bool windowClosed = false;
     GameState lastState = GameState::None;
+    bool needRedraw = false; // O23: a sprite swap leaves the old picture on screen
 
     // THE BUTTONS, ONE SNAPSHOT PER CHANGE. At 10-20 frames a second a quick tap goes down AND up between two
     // polls; a single "current mask" would never see it. Every change is queued and the logic consumes one
     // snapshot per step, so a press and its release always land on different steps, in order.
     uint16_t keysHeld = 0, joyHeldMask = 0, held = 0;
-    std::vector<uint16_t> queued;
+    // O23: the two keyboard halves and the two joystick ports, kept apart so each player can have one of them.
+    // Index 0 is the whole mask (every device at once), 1..4 are the devices the settings screen offers.
+    struct Snapshot {
+        uint16_t mask[5];
+    };
+    uint16_t devHeld[5] = {0, 0, 0, 0, 0};
+    uint16_t keysArrows = 0, keysWasd = 0;
+    std::vector<Snapshot> queued;
     size_t queuedAt = 0;
+    if (autoplay.soloKeys) {
+        // A on the title to start, then eight hops forward on the ARROWS device only. Device 1 is the arrows
+        // (Session::controlNames), and mask[0] is what the whole keyboard would show.
+        const uint16_t open[] = {0, ActA, 0, 0};
+        for (unsigned i = 0; i < sizeof(open) / sizeof(open[0]); i++)
+            for (int hold = 0; hold < 20; hold++) {
+                Snapshot snap;
+                for (int d = 0; d < 5; d++) snap.mask[d] = open[i];
+                queued.push_back(snap);
+            }
+        // Four hops on the ARROWS device, then four on WSAD. Each half also sets mask[0], because a real key
+        // press does: the whole-keyboard mask is what the menus read. Afterwards each player must have moved
+        // exactly four rows - the log line "game: p1 z=... | p2 z=..." says so in 16.16 (4 rows = 262144).
+        for (int device = 1; device <= 2; device++)
+            for (int hop = 0; hop < 4; hop++)
+                for (int phase = 0; phase < 2; phase++)
+                    for (int hold = 0; hold < 20; hold++) {
+                        Snapshot snap;
+                        for (int d = 0; d < 5; d++) snap.mask[d] = 0;
+                        if (phase == 0) {
+                            snap.mask[0] = ActUp;       // the whole keyboard sees the key
+                            snap.mask[device] = ActUp;  // and so does the one device it belongs to
+                        }
+                        queued.push_back(snap);
+                    }
+    }
+    if (autoplay.menuWalk) {
+        // Select opens the settings from the title screen; then one Down every 40 frames, far enough to walk the
+        // whole list and scroll it. Each entry of the script is held for 20 frames, released for 20.
+        const uint16_t open[] = {0, ActSelect, 0, 0};
+        for (unsigned i = 0; i < sizeof(open) / sizeof(open[0]); i++)
+            for (int hold = 0; hold < 20; hold++) {
+                Snapshot snap;
+                for (int d = 0; d < 5; d++) snap.mask[d] = open[i];
+                queued.push_back(snap);
+            }
+        for (int step = 0; step < 12; step++)
+            for (int phase = 0; phase < 2; phase++)
+                for (int hold = 0; hold < 20; hold++) {
+                    Snapshot snap;
+                    for (int d = 0; d < 5; d++) snap.mask[d] = phase == 0 ? ActDown : 0;
+                    queued.push_back(snap);
+                }
+    }
     if (autoplay.on && autoplay.progression) {
         // Progression from the title: down, A (the career page), A again (Continue) - then the bot takes over.
         const uint16_t script[] = {0, ActDown, 0, ActA, 0, 0, 0, 0, 0, 0, ActA, 0};
         for (unsigned i = 0; i < sizeof(script) / sizeof(script[0]); i++)
-            for (int hold = 0; hold < 30; hold++) queued.push_back(script[i]);
+            for (int hold = 0; hold < 30; hold++) {
+                Snapshot snap;
+                snap.mask[0] = script[i];
+                for (int d = 1; d < 5; d++) snap.mask[d] = script[i];
+                queued.push_back(snap);
+            }
     }
 
     while (!session.quit && !windowClosed) {
@@ -1550,9 +1737,17 @@ int main(void)
                     continue;
                 }
                 const uint16_t button = buttonForKey(raw);
-                if (!button) continue;
-                if (ev.code & 0x80) keysHeld = uint16_t(keysHeld & ~button);
-                else keysHeld = uint16_t(keysHeld | button);
+                const uint16_t arrows = arrowsForKey(raw), wasd = wasdForKey(raw);
+                if (!button && !arrows && !wasd) continue;
+                if (ev.code & 0x80) {
+                    keysHeld = uint16_t(keysHeld & ~button);
+                    keysArrows = uint16_t(keysArrows & ~arrows);
+                    keysWasd = uint16_t(keysWasd & ~wasd);
+                } else {
+                    keysHeld = uint16_t(keysHeld | button);
+                    keysArrows = uint16_t(keysArrows | arrows);
+                    keysWasd = uint16_t(keysWasd | wasd);
+                }
             }
         }
         {
@@ -1561,27 +1756,32 @@ int main(void)
             //   blue (2nd button, CD32 B) -> B in the menus, START (pause) during play - a 2-button stick has
             //                                nothing else to pause with
             //   CD32 PLAY -> START            green -> SELECT (S)          yellow -> B
-            const unsigned j = bh_joy_held();
             const bool playing = game.state() == GameState::Playing && session.screens.menu() == Menu::None;
-            uint16_t m = 0;
-            if (j & BH_JOY_UP) m |= ActUp;
-            if (j & BH_JOY_DOWN) m |= ActDown;
-            if (j & BH_JOY_LEFT) m |= ActLeft;
-            if (j & BH_JOY_RIGHT) m |= ActRight;
-            if (j & BH_JOY_FIRE) m |= ActA;
-            if (j & BH_JOY_FIRE2) m |= playing ? ActStart : ActB;
-            if (j & BH_JOY_PLAY) m |= ActStart;
-            if (j & BH_JOY_GREEN) m |= ActSelect;
-            if (j & BH_JOY_YELLOW) m |= ActB;
             // A button that changes meaning while held (blue, as play starts or stops) must not leave the old
             // meaning stuck down: the mapped mask is rebuilt from scratch every frame, so it cannot.
-            joyHeldMask = m;
+            const uint16_t joy2 = joyButtons(bh_joy_held_port(1), playing);
+            // O23: the mouse socket is only read when somebody chose it. A mouse there reports its movement in the
+            // very bits a stick uses for directions, and reading it unasked would hop a hero about at random.
+            const bool useMousePort = session.settings.players > 1 &&
+                                      (session.settings.control[0] == 3 || session.settings.control[1] == 3);
+            const uint16_t joy1 = useMousePort ? joyButtons(bh_joy_held_port(0), playing) : uint16_t(0);
+            joyHeldMask = uint16_t(joy2 | joy1);
+            devHeld[1] = keysArrows;
+            devHeld[2] = keysWasd;
+            devHeld[3] = joy2;
+            devHeld[4] = joy1;
         }
         {
             const uint16_t now = uint16_t(keysHeld | joyHeldMask);
-            if (now != held) {
+            devHeld[0] = now;
+            if (now != held || queued.empty()) {
+                const bool changed = now != held;
                 held = now;
-                queued.push_back(held);
+                if (changed) {
+                    Snapshot snap;
+                    for (int d = 0; d < 5; d++) snap.mask[d] = devHeld[d];
+                    queued.push_back(snap);
+                }
             }
         }
 
@@ -1604,9 +1804,22 @@ int main(void)
                 game.step();
                 game.endFrame();
             } else {
-                uint16_t mask = held;
-                if (queuedAt < queued.size()) mask = queued[queuedAt++];
-                session.step(uint16_t(mask | autoplay.mask(game)));
+                Snapshot snap;
+                for (int d = 0; d < 5; d++) snap.mask[d] = devHeld[d];
+                if (queuedAt < queued.size()) snap = queued[queuedAt++];
+                // O23: each player's device gets its OWN bot, so an unattended two-player run really plays two
+                // games at once; every other device (and the menus) get the first bot, as before.
+                const uint16_t bot1 = autoplay.mask(game, 0);
+                const uint16_t bot2 = session.settings.players > 1 ? autoplay.mask(game, 1) : bot1;
+                const int devP1 = playerDevice(session.settings, 0), devP2 = playerDevice(session.settings, 1);
+                for (int d = 1; d < 5; d++) {
+                    const uint16_t bot = (d == devP2 && devP2 != devP1) ? bot2 : bot1;
+                    session.input.setDevice(d, uint16_t(snap.mask[d] | bot));
+                }
+                // Device 0 is what the MENUS read, so the first bot goes there as well - that is how an
+                // unattended run gets past the title screen. It reaches no player: each player reads its own
+                // device, which was filled just above.
+                session.step(uint16_t(snap.mask[0] | bot1));
             }
             ran++;
             steps++;
@@ -1615,6 +1828,41 @@ int main(void)
         if (queuedAt >= queued.size()) {
             queued.clear();
             queuedAt = 0;
+        }
+
+        // O23 SWAPPING THE SPRITE SET. Two players (or the wide view) need the wide container, and only one
+        // container is ever in memory. The swap throws away every Model::mesh pointer the renderer handed out, so
+        // it happens ONLY on the title screen with no menu open - never while anyone is playing - and the second
+        // or so it takes on a hard disk is covered by a line on screen rather than a frozen picture.
+        {
+            const bool wantWide = session.settings.players > 1 || session.settings.framing == 1;
+            if (wantWide != gWide && game.state() == GameState::None && session.screens.menu() == Menu::None &&
+                !game.restarting()) {
+                const char *want = spritePathFor(displayPrefs.hires != 0, wantWide);
+                bh_fill_rect(&surface, 0, 0, surface.width, surface.height, BH_SKY_INDEX);
+                if (font.faceCount > 0) {
+                    const char *msg = "LOADING";
+                    const int f = font.faceCount - 1; // the largest face the container carries
+                    bh_font_draw(&surface, &font, f, msg, (surface.width - bh_font_width(&font, f, msg)) / 2,
+                                 surface.height / 2, BH_UI_TEXT);
+                }
+                amigagfx_blit(0, 0, gScreenW, gScreenH);
+                BHSprites next;
+                if (bh_sprites_load(&next, want)) {
+                    bh_sprites_free(&sprites);
+                    sprites = next;
+                    gWide = wantWide;
+                    amigagfx_set_palette(sprites.palette, 0, 256);
+                    renderer.init(&sprites, models, surface.width, surface.height);
+                    printf("sprites: swapped to %s\n", want);
+                } else {
+                    // Nothing was freed, so the game carries on with the set it has and says so once.
+                    printf("sprites: cannot load %s - staying on the %s set\n", want, gWide ? "wide" : "normal");
+                    session.settings.players = 1;
+                    session.settings.framing = 0;
+                }
+                needRedraw = true;
+            }
         }
         if (game.state() != lastState) {
             lastState = game.state();
@@ -1646,6 +1894,10 @@ int main(void)
         renderer.setDetail(dumpingNow);
         profSound += profMicros() - tSound0;
         const unsigned long tRender0 = profMicros();
+        if (needRedraw) {
+            renderer.forceClear();
+            needRedraw = false;
+        }
         renderer.render(surface, game);
         profRender += profMicros() - tRender0;
         const unsigned long tUi0 = profMicros();
@@ -1747,6 +1999,10 @@ int main(void)
         if (milestoneDue) {
             printf("playtest: milestone %d at %lu logic steps, score %d, hero z=%ld (16.16)\n", milestoneNext, ran,
                    game.score(), (long)game.hero().position().z.v);
+            if (game.playerCount() > 1)
+                printf("playtest: p1 z=%ld score %d %s | p2 z=%ld score %d %s (16.16)\n",
+                       (long)game.hero(0).position().z.v, game.score(0), game.hero(0).isAlive ? "alive" : "dead",
+                       (long)game.hero(1).position().z.v, game.score(1), game.hero(1).isAlive ? "alive" : "dead");
             amigagfx_dump_screen(kMilestoneRaw[milestoneNext], kMilestonePal[milestoneNext]);
             renderer.printCensus();
             milestoneNext++;
@@ -1762,6 +2018,12 @@ int main(void)
         }
         if (gProfiling && now - lastReport >= 5000UL) {
             const unsigned long secs = (now - start) / 1000UL;
+            // O23: with two players the interesting number is WHERE EACH OF THEM IS - one score and one
+            // state say nothing about whether the arrows moved the wrong hero.
+            if (game.playerCount() > 1)
+                printf("game: p1 z=%ld score %d %s | p2 z=%ld score %d %s (16.16)\n",
+                       (long)game.hero(0).position().z.v, game.score(0), game.hero(0).isAlive ? "alive" : "dead",
+                       (long)game.hero(1).position().z.v, game.score(1), game.hero(1).isAlive ? "alive" : "dead");
             printf("game: %lu frames in %lu s (%lu fps), %lu steps, %lu sprites, %lu sounds, score %d, state %d\n",
                    frames, secs, secs ? frames / secs : frames, steps, (unsigned long)renderer.drawn(),
                    board.played(), game.score(), (int)game.state());

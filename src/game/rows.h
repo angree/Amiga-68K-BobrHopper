@@ -74,7 +74,9 @@ struct WaterRow {
     // the game (GameContext::originalBehaviour, O7.3): the foam animates only while the row is near the hero
     void updateFoam(GameContext &ctx, real heroZ);
     void generate(GameContext &ctx, const std::vector<int> &clearPositions);
-    void update(GameContext &ctx, Player &player);
+    // O23: every player in one call. The logs move once and then each player is checked against them, so two heroes
+    // cannot make the river run at double speed. With count == 1 the order of everything is what it always was.
+    void update(GameContext &ctx, Player *players, int count);
     RowEntity *getRidableForPosition(const Vec3 &position);
     real getPlayerLowerBouncePositionForEntity(const RowEntity &e) const { return e.top + e.mid; }
     real getPlayerSunkenPosition() const { return rsin(sineCount) * real(0.08) - real(0.2); }
@@ -98,7 +100,7 @@ struct RoadRow {
     // O8/O15 (the game, difficulty.h): the cars' speed from baskets [first, open) of the four, same random number -
     // `open` grows with the score at the start, `first` grows again past 150 points, taking the slowest lanes away
     void applySpeedBaskets(int first, int open);
-    void update(GameContext &ctx, Player &player);
+    void update(GameContext &ctx, Player *players, int count);
 
 private:
     void carGen(GameContext &ctx);
@@ -117,7 +119,7 @@ struct RailRoadRow {
     bool passSoundPending = false; // the train wrapped; its pass sound plays as it approaches (not in the original)
 
     void construct(GameContext &ctx);
-    void update(GameContext &ctx, Player &player);
+    void update(GameContext &ctx, Player *players, int count);
 
 private:
     void trainShouldCheckCollision(GameContext &ctx, Player &player);

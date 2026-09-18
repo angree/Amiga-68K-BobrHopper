@@ -79,12 +79,15 @@ void bh_joy_report(void)
  * enough while the stick only hopped; the shared menus want a held button mask, exactly as the keyboard gives
  * them, and the platform turns changes of that mask into presses and releases for both devices the same way.
  * The same filters apply: a mouse and an impossible (floating) port read as nothing. */
-unsigned bh_joy_held(void)
+unsigned bh_joy_held(void) { return bh_joy_held_port(1); }
+
+unsigned bh_joy_held_port(int port)
 {
     ULONG state;
     unsigned type, held = 0;
     if (!g_lowlevel) return 0;
-    state = ReadJoyPort(1);
+    if (port < 0 || port > 1) return 0;
+    state = ReadJoyPort((ULONG)port);
     type = (unsigned)(state & JP_TYPE_MASK);
     if (type != JP_TYPE_JOYSTK && type != JP_TYPE_GAMECTLR && type != JP_TYPE_UNKNOWN) return 0;
     if (((state & JPF_JOY_UP) && (state & JPF_JOY_DOWN)) || ((state & JPF_JOY_LEFT) && (state & JPF_JOY_RIGHT)))

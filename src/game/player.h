@@ -27,9 +27,25 @@ public:
     RowEntity *ridingOn = nullptr;
     real ridingOnOffset = 0;
 
+    // O23 (two players): which player this is, 0 or 1. Everything the rows and the collisions report carries it, so
+    // one hero can drown while the other rides on. With one player it is always 0 and nothing below is ever used.
+    int index = 0;
+    // standing on the other player's head: whoever is below carries whoever is above. The carried player copies the
+    // carrier's x and z every step, so it rides along on a log and falls behind the moment the carrier hops away.
+    Player *carriedBy = nullptr;
+    Player *carrying = nullptr;
+    // Progression 2P: steps left before a dead player is put back on the partner's head (0 = not waiting)
+    int respawnSteps = 0;
+    // Classic 2P: steps this player has been at the edge of the frame, blinking before it falls behind for good
+    int warnSteps = 0;
+
     Vec3 &position() { return object->position; }
     Vec3 &rotation() { return object->rotation; }
     Vec3 &scale() { return object->scale; }
+    // O23: the renderers and Game::leader() look at players they must not move
+    const Vec3 &position() const { return object->position; }
+    const Vec3 &rotation() const { return object->rotation; }
+    const Vec3 &scale() const { return object->scale; }
 
     void construct(GameContext &ctx, const std::string &characterId);
     void setCharacter(GameContext &ctx, const std::string &characterId);

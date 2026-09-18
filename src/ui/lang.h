@@ -11,6 +11,8 @@ enum Str {
     Level, Rank, NoRank, LevelDone, NewRank, TryAgain, NewBest, Score, Top,
     Paused, Resume, Settings, MenuItem, Exit, Back,
     Sounds, Music, Shadows, Full, Simple, Off, On, FpsCounter, View, Normal, Wide, Character, Language,
+    // O23 (two players)
+    Players, ControlP1, ControlP2, OnePlayer, TwoPlayers, Wins, Draw, PlayerOne, PlayerTwo,
     HintHome, HintCareer, HintConfirm, HintPause, HintSettings, HintLevelOver,
     Count
 };

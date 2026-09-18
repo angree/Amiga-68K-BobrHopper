@@ -36,8 +36,9 @@ public:
     void init();
 
     // input, as GestureView delivers it: key down = beginMoveWithDirection, key up = the swipe
-    void beginMoveWithDirection();
-    void moveWithDirection(Swipe direction);
+    // O23: `player` is 0 or 1; with one player it is always 0 and every existing caller is unchanged.
+    void beginMoveWithDirection(int player = 0);
+    void moveWithDirection(Swipe direction, int player = 0);
 
     // updateWithGameState(playing) from the home screen: stopIdle + first hop
     void startPlaying();
@@ -57,6 +58,21 @@ public:
     // index.tsx UNSAFE_componentWillReceiveProps: a new character swaps the hero's model at once; the next
     // setupGame (restart) uses it too
     void setCharacter(const std::string &characterId);
+    // O23: the second player's character. Defaults to the other of beaver/chicken, so a two-player game never shows
+    // the same animal twice without the app having to say anything.
+    void setCharacter(int player, const std::string &characterId);
+
+    // O23 TWO PLAYERS. 1 or 2; setting it rebuilds the scene (the starting columns and the rows differ), so call it
+    // from the home screen exactly like setLevel().
+    void setPlayerCount(int count);
+    int playerCount() const { return playerCount_; }
+    // Classic 2P is a duel: whoever is left behind by more than this many rows falls out of the frame and dies.
+    // Progression 2P is co-operative: the leader is pulled back onto the other player's head instead.
+    static const int kMaxGap = 7;
+    // which player leads (the one with the largest z among those alive; player 0 when nobody is)
+    int leader() const;
+    // Classic 2P: 0 or 1 for a winner on score, -1 for a draw (and always 0 with one player)
+    int winner() const;
 
     // browser frame: GSAP ticker, timers, engine tick, deferred work
     void step();
@@ -78,12 +94,15 @@ public:
     Node *sceneRoot() { return scene_; }
     Node *world() { return world_; }
     Node *worldWithCamera() { return worldWithCamera_; }
-    Player &hero() { return hero_; }
+    Player &hero() { return heroes_[0]; }
+    Player &hero(int player) { return heroes_[player >= 0 && player < playerCount_ ? player : 0]; }
+    const Player &hero(int player) const { return heroes_[player >= 0 && player < playerCount_ ? player : 0]; }
     GameMap &map() { return *map_; }
     const ParticleSystem &feathers() const { return feathers_; }
     const ParticleSystem &waterParticles() const { return water_; }
     GameState state() const { return state_; }
-    int score() const { return score_; }
+    int score() const { return score_[0]; }
+    int score(int player) const { return score_[player >= 0 && player < 2 ? player : 0]; }
     int highscore() const { return highscore_; }
     void setHighscore(int v) { highscore_ = v; }
     // profile of step() in microseconds, summed while profileClock is set (the SF2000 core's game report); a null
@@ -108,17 +127,39 @@ private:
     void onCollide(const Collision &c);
     void gameOver();
     void forwardScene();
-    void updateScore();
-    void checkIfUserHasFallenOutOfFrame();
+    void updateScore(int player);
+    void checkIfUserHasFallenOutOfFrame(int player);
+    // O23: this player is out of the game - killed by the gap of a duel, or drowned, or run over. The game itself
+    // ends only when no player is left; Progression 2P puts a dead player back on the partner's head instead.
+    void killPlayer(int player, const char *particle, real direction);
+    void endForPlayer(int player);
+    void outOfFrame(int player);
+    // O23 Progression 2P: the leader is pulled back onto the other player's head instead of leaving it behind
+    void pullBack(int front, int back);
+    void reviveOnPartner(int player, int partner);
+    // O23: the upper player was left standing in mid-air when the lower one hopped away - it comes down onto
+    // whatever its own tile turns out to be (grass, a log, or the water that then drowns it)
+    void landAfterCarry(int player);
+    // O23: two players who ended up on one tile with neither carried - the higher one is put on the other's head
+    void stackOnOneTile();
+    // O23: the head-standing rules, the gap that decides both modes, and the wait before a co-op revival. All three
+    // return at once with one player.
+    void updateCarrying();
+    void updateGap();
+    void updateRespawn();
+    // is THIS player out of the game? With one player it is exactly isGameEnded().
+    bool playerBlocked(int player) const;
     void rumble();
-    void useParticle(const char *type, real direction);
+    void useParticle(const char *type, real direction, int player);
+    // O23: which animal player `player` wears (player 1 gets the opposite of player 0 unless the app says)
+    const std::string &characterOf(int player) const;
     void runFeathers(real direction);
     void runWater();
     bool isGameEnded() const;
 
-    void playMoveSound();
+    void playMoveSound(int player);
     void playPassiveCarSound();
-    void playDeathSound();
+    void playDeathSound(int player);
     void playCarHitSound();
 
     const ModelLibrary &models_;
@@ -130,7 +171,8 @@ private:
 
     Node *scene_ = nullptr, *worldWithCamera_ = nullptr, *world_ = nullptr;
     std::unique_ptr<GameMap> map_;
-    Player hero_;
+    Player heroes_[2];
+    int playerCount_ = 1;
     ParticleSystem feathers_, water_;
     Vec3 cameraPosition_{-1, 2.8, -2.9};
     real camCount_ = 0;
@@ -138,16 +180,19 @@ private:
     // React component state: setState() only becomes visible to the engine after the frame, when React
     // commits (the original's onSwipe right after updateWithGameState('playing') still sees "none")
     void setState(GameState s);
-    void setScore(int s);
+    void setScore(int player, int s);
     void commitState();
     GameState state_ = GameState::None;
-    int score_ = 0, highscore_ = 0;
+    int score_[2] = {0, 0};
+    int highscore_ = 0;
     int level_ = 0;          // O11.3: 0 = Classic
     bool levelDone_ = false; // the finish line of this level was crossed
-    bool pendingState_ = false, pendingScore_ = false;
+    bool pendingState_ = false;
+    bool pendingScore_[2] = {false, false};
     GameState nextState_ = GameState::None;
-    int nextScore_ = 0;
+    int nextScore_[2] = {0, 0};
     std::string character_ = "chicken";
+    mutable std::string character2_; // empty = pick the opposite of character_
     int audioFileMoveIndex_ = 0;
     std::vector<std::string> sounds_;
     std::vector<std::function<void()>> nextFrame_;  // requestAnimationFrame callbacks

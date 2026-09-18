@@ -14,6 +14,7 @@
 namespace cr {
 
 struct RowEntity;
+class Player;
 
 // what Engine.onCollide(obstacle, type, collision) receives
 struct Collision {
@@ -21,6 +22,8 @@ struct Collision {
     bool hasSpeed = false;
     const char *type = "feathers"; // "feathers" | "water"
     const char *kind = "";         // "car" | "train" | "" (undefined)
+    // O23 (two players): WHO was hit. Null means the first player, so every existing caller keeps its meaning.
+    Player *who = nullptr;
 };
 
 // setTimeout replacement on game time
@@ -76,6 +79,10 @@ struct GameContext {
     // more than half of the whole logic step, for decoration at x = +-4.5 - the very edge of a 320-pixel view.
     // It draws from the fx random stream only, which feeds nothing but visuals.
     bool foam = true;
+    // O23 (two players): every row must offer at least TWO columns to walk on, not one, so the two players are never
+    // forced through the same gap. Set by Game::setPlayerCount; it only ever loosens a row, and with one player it
+    // stays false, so the rows a single player gets are drawn from the same random numbers as before.
+    bool twoPaths = false;
 };
 
 } // namespace cr

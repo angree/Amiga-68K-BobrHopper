@@ -43,8 +43,14 @@ void bh_joy_poll(BHJoyEdges *out);
 #define BH_JOY_PLAY 0x40   /* CD32 pad */
 #define BH_JOY_GREEN 0x80  /* CD32 pad */
 #define BH_JOY_YELLOW 0x100 /* CD32 pad */
-/* What port 1 holds right now; 0 without lowlevel.library, for a mouse, or for a floating port. */
+/* What the joystick port holds right now; 0 without lowlevel.library, for a mouse, or for a floating port. */
 unsigned bh_joy_held(void);
+
+/* O23 (two players): the same, for a named port. 1 is the joystick socket (what bh_joy_held reads), 0 is the one
+ * the mouse normally lives in - a second player's stick can go there, so it is readable, but ONLY when a player
+ * has actually chosen it in the settings: a mouse in that socket reports movement in the direction bits and would
+ * hop a hero about at random. */
+unsigned bh_joy_held_port(int port);
 
 /* The DECODING on its own, with no hardware behind it: turn one raw ReadJoyPort() bitfield into edges.
  *

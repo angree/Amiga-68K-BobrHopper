@@ -19,6 +19,12 @@ constexpr bool idleDuringGamePlay = false;
 constexpr real PI_2 = 3.141592653589793 * 0.5; // Math.PI * 0.5, not the float PI
 constexpr real playerIdleScale = 0.8;
 constexpr real heroWidth = 0.7;
+// O23 (two players): how high one player stands when it lands on the other's head. Every character is scaled so
+// that its longest side is 1 unit, so a hero is a little under a unit tall; this is measured to sit the upper one
+// on the lower one's head rather than in it.
+constexpr real headHeight = 0.75;
+// O23 Progression 2P: steps before a dead player is put back into the game on the partner's head (2 s at 60 Hz)
+constexpr int respawnSteps = 120;
 
 // CrossyCamera: OrthographicCamera(-1, 1, 1, -1, -30, 30), lookAt(0,0,0) from (-1, 2.8, -2.9),
 // then init() sets position.z = 1 (the rotation stays from the constructor)

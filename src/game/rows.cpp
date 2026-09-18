@@ -208,16 +208,41 @@ void WaterRow::generateStatic(GameContext &ctx, const std::vector<int> &clearPos
         xPos += rfloor(r.next() * 2 + 2);
     }
 
-    if (!clearPositions.empty()) {
+    const auto isClear = [&clearPositions](int x) {
+        return std::find(clearPositions.begin(), clearPositions.end(), x) != clearPositions.end();
+    };
+    if (!clearPositions.empty() && !ctx.twoPaths) {
         bool hasAccessibleLilyPad = false;
         for (real p : positions)
-            if (std::find(clearPositions.begin(), clearPositions.end(), int(p)) != clearPositions.end())
-                hasAccessibleLilyPad = true;
+            if (isClear(int(p))) hasAccessibleLilyPad = true;
         if (!hasAccessibleLilyPad) {
             int clearPos = clearPositions[size_t(int(rfloor(r.next() * real(int(clearPositions.size())))))];
             positions[0] = clearPos;
             std::sort(positions.begin(), positions.end());
         }
+    } else if (!clearPositions.empty()) {
+        // O23 (two players): TWO pads the players can reach, not one, so neither has to wait for the other's square.
+        // Pads already on a reachable column are kept; the rest are moved onto reachable columns nothing sits on,
+        // starting from a random one of them so a river's crossings are not always at the same end.
+        std::vector<int> onClear;
+        for (real p : positions)
+            if (isClear(int(p)) && std::find(onClear.begin(), onClear.end(), int(p)) == onClear.end())
+                onClear.push_back(int(p));
+        std::vector<int> spare;
+        for (int c : clearPositions)
+            if (std::find(onClear.begin(), onClear.end(), c) == onClear.end()) spare.push_back(c);
+        if (onClear.size() < 2 && !spare.empty()) {
+            const int start = int(rfloor(r.next() * real(int(spare.size()))));
+            size_t slot = 0;
+            for (size_t k = 0; onClear.size() < 2 && k < spare.size(); k++) {
+                const int c = spare[(size_t(start) + k) % spare.size()];
+                while (slot < positions.size() && isClear(int(positions[slot]))) slot++;
+                if (slot >= positions.size()) break;
+                positions[slot++] = real(c);
+                onClear.push_back(c);
+            }
+        }
+        std::sort(positions.begin(), positions.end());
     }
 
     for (real p : positions) lilyPadPositions.push_back(int(p));
@@ -308,7 +333,7 @@ void WaterRow::bounce(GameContext &ctx, RowEntity &entity, Player &player)
     ctx.gsap->to(&player.position(), {{'y', entity.top + entity.mid}}, timing, d);
 }
 
-void WaterRow::update(GameContext &ctx, Player &player)
+void WaterRow::update(GameContext &ctx, Player *players, int count)
 {
     if (!active) return;
     const real offset = 11;
@@ -326,31 +351,37 @@ void WaterRow::update(GameContext &ctx, Player &player)
         }
     }
 
-    if (!player.moving && !player.ridingOn) {
-        for (auto &e : entities) {
-            // shouldCheckCollision
-            if (jsRound(player.position().z) == object->position.z && player.isAlive) {
-                const Vec3 &m = e->mesh->position;
-                if (player.position().x < m.x + e->collisionBox && player.position().x > m.x - e->collisionBox) {
-                    player.ridingOn = e.get();
-                    player.ridingOnOffset = player.position().x - m.x;
-                    bounce(ctx, *e, player);
+    for (int pi = 0; pi < count; pi++) {
+        Player &player = players[pi];
+        // O23: a player riding on the other one's head is not in the water at all - the carrier is
+        if (player.carriedBy) continue;
+        if (!player.moving && !player.ridingOn) {
+            for (auto &e : entities) {
+                // shouldCheckCollision
+                if (jsRound(player.position().z) == object->position.z && player.isAlive) {
+                    const Vec3 &m = e->mesh->position;
+                    if (player.position().x < m.x + e->collisionBox && player.position().x > m.x - e->collisionBox) {
+                        player.ridingOn = e.get();
+                        player.ridingOnOffset = player.position().x - m.x;
+                        bounce(ctx, *e, player);
+                    }
                 }
             }
-        }
-        // shouldCheckHazardCollision
-        if (jsRound(player.position().z) == object->position.z && !player.moving) {
-            if (!player.ridingOn) {
-                if (player.isAlive) {
-                    Collision c;
-                    c.type = "water";
-                    ctx.onCollide(c);
-                } else {
-                    real y = getPlayerSunkenPosition();
-                    sineCount += sineInc;
-                    player.position().y = y;
-                    player.rotation().y += real(0.01);
-                    if (!entities.empty()) player.position().x += entities[0]->speed;
+            // shouldCheckHazardCollision
+            if (jsRound(player.position().z) == object->position.z && !player.moving) {
+                if (!player.ridingOn) {
+                    if (player.isAlive) {
+                        Collision c;
+                        c.type = "water";
+                        c.who = &player;
+                        ctx.onCollide(c);
+                    } else {
+                        real y = getPlayerSunkenPosition();
+                        sineCount += sineInc;
+                        player.position().y = y;
+                        player.rotation().y += real(0.01);
+                        if (!entities.empty()) player.position().x += entities[0]->speed;
+                    }
                 }
             }
         }
@@ -423,28 +454,39 @@ void RoadRow::applySpeedBaskets(int first, int open)
     for (auto &c : cars) c->speed = speed * c->dir;
 }
 
-void RoadRow::update(GameContext &ctx, Player &player)
+void RoadRow::update(GameContext &ctx, Player *players, int count)
 {
     if (!active) return;
     const real offset = 11;
     for (auto &c : cars) {
         Vec3 &p = c->mesh->position;
         p.x += c->speed;
+        // O23: the car moves and wraps ONCE; only the collision test is per player. A wrapped car is not tested at
+        // all this step - that is the original's own `else if` chain, kept exactly, so one player plays as before.
         if (p.x > offset && c->speed > 0) {
             p.x = -offset;
-            if (c.get() == player.hitBy) player.hitBy = nullptr;
+            for (int pi = 0; pi < count; pi++)
+                if (c.get() == players[pi].hitBy) players[pi].hitBy = nullptr;
         } else if (p.x < -offset && c->speed < 0) {
             p.x = offset;
-            if (c.get() == player.hitBy) player.hitBy = nullptr;
-        } else if (jsRound(player.position().z) == object->position.z && player.isAlive) {
-            if (player.position().x < p.x + c->collisionBox && player.position().x > p.x - c->collisionBox) {
-                player.collideWithCar(ctx, *this, *c);
-                Collision col;
-                col.obstacleSpeed = c->speed;
-                col.hasSpeed = true;
-                col.type = "feathers";
-                col.kind = "car";
-                ctx.onCollide(col);
+            for (int pi = 0; pi < count; pi++)
+                if (c.get() == players[pi].hitBy) players[pi].hitBy = nullptr;
+        } else {
+            for (int pi = 0; pi < count; pi++) {
+                Player &player = players[pi];
+                if (player.carriedBy) continue; // carried: the one below takes the hit
+                if (jsRound(player.position().z) == object->position.z && player.isAlive) {
+                    if (player.position().x < p.x + c->collisionBox && player.position().x > p.x - c->collisionBox) {
+                        player.collideWithCar(ctx, *this, *c);
+                        Collision col;
+                        col.obstacleSpeed = c->speed;
+                        col.hasSpeed = true;
+                        col.type = "feathers";
+                        col.kind = "car";
+                        col.who = &player;
+                        ctx.onCollide(col);
+                    }
+                }
             }
         }
     }
@@ -482,16 +524,22 @@ void RailRoadRow::construct(GameContext &ctx)
     object->add(railRoad);
 }
 
-void RailRoadRow::update(GameContext &ctx, Player &player)
+void RailRoadRow::update(GameContext &ctx, Player *players, int count)
 {
     if (!active) return;
-    const bool moving = player.moving;
+    const bool moving = players[0].moving;
     const real offset = 22 * 5;
     Vec3 &p = train.mesh->position;
     p.x += train.speed;
     // the game's train sounds (GameContext::originalBehaviour): only tracks from 3 rows behind the hero to 10 ahead
     // are heard (the camera shows 8-10 ahead and 1-4 behind)
-    const real rowsAhead = object->position.z - player.position().z;
+    // O23: with two players the track is heard when it is near EITHER of them - the camera holds both in frame, so
+    // a bell that only followed player one would ring for a track off screen and stay silent for one in view.
+    real rowsAhead = object->position.z - players[0].position().z;
+    for (int pi = 1; pi < count; pi++) {
+        const real other = object->position.z - players[pi].position().z;
+        if (rabs(other) < rabs(rowsAhead)) rowsAhead = other;
+    }
     const bool heard = rowsAhead >= real(-3) && rowsAhead <= real(10);
     if (p.x > offset && train.speed > 0) {
         p.x = -offset;
@@ -514,7 +562,8 @@ void RailRoadRow::update(GameContext &ctx, Player &player)
     } else if (!moving || !ctx.originalBehaviour) {
         // the game also checks a hero in the air over the track, like the cars do: the original checks a standing hero
         // only, so a hop through a passing train killed or not depending on the step it landed on (user report)
-        trainShouldCheckCollision(ctx, player);
+        for (int pi = 0; pi < count; pi++)
+            if (!players[pi].carriedBy) trainShouldCheckCollision(ctx, players[pi]);
     }
     // The pass sound (1.5 s, 90 steps = 72 units) starts 45 steps before the train's centre reaches x = 0, so its
     // middle is the moment it crosses the hero's column; the 1.54 s alarm from the wrap (137 steps earlier) ends
@@ -543,6 +592,7 @@ void RailRoadRow::trainShouldCheckCollision(GameContext &ctx, Player &player)
         c.obstacleSpeed = train.speed;
         c.hasSpeed = true;
         c.kind = "train";
+        c.who = &player;
         ctx.onCollide(c);
         return;
     }
@@ -556,7 +606,11 @@ void RailRoadRow::trainShouldCheckCollision(GameContext &ctx, Player &player)
 #endif
     ctx.gsap->to(&player.scale(), {{'y', 0.2}, {'x', 1.5}}, 0.3);
     ctx.gsap->to(&player.rotation(), {{'y', ctx.rng->fx.next() * JS_PI - JS_PI / 2}}, 0.3);
-    ctx.onCollide(Collision()); // this.onCollide() with no arguments
+    {
+        Collision c; // this.onCollide() with no arguments
+        c.who = &player;
+        ctx.onCollide(c);
+    }
 }
 
 void RailRoadRow::startRingingLight(GameContext &ctx)

@@ -18,6 +18,18 @@ void Input::step()
         cur_ = live();
     }
     if (!recordPath_.empty()) recording_.push_back(cur_);
+    // O23: the per-device masks are latched the same way, so devicePressed/Released see the same step boundaries.
+    // A replay only carries the whole mask, so a replayed session drives device 0 - which is what one player uses.
+    devCur_[0] = cur_;
+    devPrev_[0] = prev_;
+    for (int d = 1; d < kInputDevices; d++) {
+        devPrev_[d] = devCur_[d];
+        // A DEVICE IS ONLY ITSELF. The synthetic mask (a bot, a script) is the WHOLE input state and belongs to
+        // device 0 alone: folding it in here handed every key to every player, so with two players the arrows drove
+        // both of them (user report). A platform that wants a bot to reach a particular player calls setDevice for
+        // that player's device - which is what the Amiga and the automated PC runs do.
+        devCur_[d] = replaying_ ? uint16_t(0) : devSet_[d];
+    }
 }
 
 bool Input::startRecording(const std::string &path)

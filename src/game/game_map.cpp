@@ -71,13 +71,19 @@ bool GameMap::treeCollision(const Vec3 &position) const
     return false;
 }
 
-void GameMap::tick(GameContext &ctx, Player &player)
+void GameMap::tick(GameContext &ctx, Player *players, int count)
 {
-    if (!ctx.originalBehaviour)
-        for (auto &w : water) w->updateFoam(ctx, player.position().z);
-    for (auto &r : railRoads) r->update(ctx, player);
-    for (auto &r : roads) r->update(ctx, player);
-    for (auto &w : water) w->update(ctx, player);
+    if (!ctx.originalBehaviour) {
+        // the foam follows the player in front: it is decoration at the screen edges, and the rows that show it are
+        // the ones ahead of whoever is leading
+        real z = players[0].position().z;
+        for (int i = 1; i < count; i++)
+            if (players[i].position().z > z) z = players[i].position().z;
+        for (auto &w : water) w->updateFoam(ctx, z);
+    }
+    for (auto &r : railRoads) r->update(ctx, players, count);
+    for (auto &r : roads) r->update(ctx, players, count);
+    for (auto &w : water) w->update(ctx, players, count);
 }
 
 std::vector<int> GameMap::clearPositionsFromGrass(const GrassRow &g) const
@@ -123,6 +129,15 @@ static int downstream(int mask, int dir)
     int high = 8;
     while (!(mask & (1 << high))) high--;
     return (1 << (high + 1)) - 1;
+}
+
+// how many columns a reach mask holds
+static int columnCount(int mask)
+{
+    int n = 0;
+    for (int b = 0; b < 9; b++)
+        if (mask & (1 << b)) n++;
+    return n;
 }
 
 // the column of `mask` nearest to the middle
@@ -202,7 +217,8 @@ void GameMap::newRowKind(GameContext &ctx, Kind rowKind)
     // the path check: where the hero can come from (the rows before the starting row are behind the hero, who
     // starts on column 0 of the starting row)
     int arrival = kAllColumns;
-    if (rowCount == startingRow) arrival = 1 << 4;
+    // O23: two players start on the columns either side of the middle, so that is where the path begins for them
+    if (rowCount == startingRow) arrival = ctx.twoPaths ? ((1 << 3) | (1 << 5)) : (1 << 4);
     else if (rowCount > startingRow && previousRow) arrival = previousRow->reach;
     const bool keepPath = !ctx.originalBehaviour && rowCount >= startingRow;
 
@@ -215,7 +231,16 @@ void GameMap::newRowKind(GameContext &ctx, Kind rowKind)
         const bool atFinish = finishRow > 0 && (rowCount == finishRow - 1 || rowCount == finishRow);
         g.generate(ctx, atFinish ? Fill::Clear : mapRowToObstacle(), required);
         // obstacles on every column the hero can arrive at: the one nearest the middle goes
-        if (keepPath && !(arrival & freeColumns(g))) g.removeObstacle(ctx, middleColumn(arrival));
+        if (keepPath && !ctx.twoPaths && !(arrival & freeColumns(g))) g.removeObstacle(ctx, middleColumn(arrival));
+        // O23 (two players): TWO columns to arrive at, not one. Obstacles nearest the middle come down until there
+        // are two - or until nothing is left to take down, which cannot happen while `arrival` itself holds two.
+        if (keepPath && ctx.twoPaths) {
+            while (columnCount(arrival & freeColumns(g)) < 2) {
+                const int blocked = arrival & ~freeColumns(g);
+                if (!blocked) break;
+                g.removeObstacle(ctx, middleColumn(blocked));
+            }
+        }
         RowRef ref;
         ref.type = RowType::Grass;
         ref.grass = &g;

@@ -47,6 +47,7 @@ void Screens::openSettings(bool fromPause)
     menu_ = Menu::Settings;
     settingsFromPause_ = fromPause;
     cursor_ = 0;
+    scrollTop_ = 0;
 }
 
 // O11.2: the home screen owns Up / Down / A / B; everything else (Select for the settings) stays with the app
@@ -122,7 +123,10 @@ bool Screens::handleInput(const Input &in, UserSettings &s, MenuResult &out)
     }
     // Button: button_in when pressed, button_out when released
     if (in.pressed(ActA) || in.pressed(ActB)) sound("button_in");
-    const int count = menu_ == Menu::Pause ? 4 : 8;
+    SettingsItem items[SetItemCount];
+    const int settingsCount = menu_ == Menu::Settings ? settingsItems(s, items) : 0;
+    const int count = menu_ == Menu::Pause ? 4 : settingsCount;
+    if (cursor_ >= count) cursor_ = count - 1;
     if (in.pressed(ActUp)) cursor_ = (cursor_ + count - 1) % count;
     if (in.pressed(ActDown)) cursor_ = (cursor_ + 1) % count;
 
@@ -161,28 +165,50 @@ bool Screens::handleInput(const Input &in, UserSettings &s, MenuResult &out)
     if (activate && dir == 0) dir = 1;
     if (dir == 0) return true;
     bool changed = true;
-    switch (cursor_) {
-    case 0: {
+    switch (items[cursor_]) {
+    case SetSounds: {
         const int v = std::max(0, std::min(10, s.volume + dir));
         changed = v != s.volume;
         s.volume = v;
         break;
     }
-    case 1: {
+    case SetMusic: {
         const int v = std::max(0, std::min(100, s.music + 2 * dir));
         changed = v != s.music;
         s.music = v;
         break;
     }
-    case 2: s.shadows = (s.shadows + dir + 3) % 3; break;
-    case 3: s.fpsCounter = !s.fpsCounter; break;
-    case 4: s.framing = 1 - s.framing; break;
+    case SetShadows: s.shadows = (s.shadows + dir + 3) % 3; break;
+    case SetFps: s.fpsCounter = !s.fpsCounter; break;
+    case SetView: s.framing = 1 - s.framing; break;
     // O11.5: the language of the whole UI, in place of the battery saver the user asked to drop
-    case 5:
+    case SetLanguage:
         s.language = 1 - s.language;
         lang::set(s.language);
         break;
-    case 6: s.character = (s.character + dir + kCharacterCount) % kCharacterCount; break;
+    case SetCharacter: s.character = (s.character + dir + kCharacterCount) % kCharacterCount; break;
+    // O23: one player or two. Turning the second one on also gives it a device of its own, because two players on
+    // one set of keys cannot play.
+    case SetPlayers:
+        s.players = s.players == 1 ? 2 : 1;
+        if (s.players > 1 && controlCount > 1 && s.control[1] == s.control[0])
+            s.control[1] = (s.control[0] + 1) % controlCount;
+        break;
+    case SetControl1:
+    case SetControl2: {
+        const int p = items[cursor_] == SetControl1 ? 0 : 1;
+        const int other = p == 0 ? 1 : 0;
+        int v = s.control[p];
+        // step on to the next device, stepping over the one the other player is using
+        for (int k = 0; k < controlCount; k++) {
+            v = (v + dir + controlCount) % controlCount;
+            if (s.players < 2 || v != s.control[other]) break;
+        }
+        changed = v != s.control[p];
+        s.control[p] = v;
+        break;
+    }
+    case SetBack:
     default:
         changed = false;
         if (activate) {
@@ -264,6 +290,85 @@ void Screens::drawPause(Renderer &renderer, TextRenderer &text, int w, int h)
     centred(renderer, text, lang::t(lang::HintPause), w, h - 30, 12, kWhite, 2);
 }
 
+// O23: which entries are on the screen right now. The two control entries only exist where the platform offered
+// more than one device, and the second player's only when there is a second player - so a platform that hands over
+// no device names keeps exactly the seven settings and the Back line it always had.
+int Screens::settingsItems(const UserSettings &s, SettingsItem *out) const
+{
+    int n = 0;
+    if (controlNames && controlCount > 1) {
+        out[n++] = SetPlayers;
+        out[n++] = SetControl1;
+        if (s.players > 1) out[n++] = SetControl2;
+    }
+    out[n++] = SetSounds;
+    out[n++] = SetMusic;
+    out[n++] = SetView;
+    out[n++] = SetLanguage;
+    out[n++] = SetCharacter;
+    out[n++] = SetShadows;
+    out[n++] = SetFps;
+    out[n++] = SetBack;
+    return n;
+}
+
+// rows of the list that fit between the title and the hint line (the Amiga's 320x240 screen is the shortest: its
+// overlay is 640x458 logical pixels, not 640x480)
+int Screens::visibleRows(int h)
+{
+    const int rows = (h - 96 - 56) / 42;
+    return rows < 4 ? 4 : rows > SetItemCount ? SetItemCount : rows;
+}
+
+lang::Str Screens::settingsLabel(SettingsItem item)
+{
+    switch (item) {
+    case SetPlayers: return lang::Players;
+    case SetControl1: return lang::ControlP1;
+    case SetControl2: return lang::ControlP2;
+    case SetSounds: return lang::Sounds;
+    case SetMusic: return lang::Music;
+    case SetView: return lang::View;
+    case SetLanguage: return lang::Language;
+    case SetCharacter: return lang::Character;
+    case SetShadows: return lang::Shadows;
+    case SetFps: return lang::FpsCounter;
+    default: return lang::Back;
+    }
+}
+
+std::string Screens::settingsValue(SettingsItem item, const UserSettings &s) const
+{
+    static const lang::Str shadowNames[] = {lang::Full, lang::Simple, lang::Off};
+    switch (item) {
+    case SetPlayers: return lang::t(s.players > 1 ? lang::TwoPlayers : lang::OnePlayer);
+    case SetControl1:
+    case SetControl2: {
+        const int p = item == SetControl1 ? 0 : 1;
+        const int v = s.control[p];
+        return controlNames && v >= 0 && v < controlCount ? controlNames[v] : "-";
+    }
+    case SetSounds: return toString(s.volume);
+    case SetMusic: return toString(s.music);
+    case SetView: return lang::t(s.framing ? lang::Wide : lang::Normal);
+    case SetLanguage: return s.language ? "POLSKI" : "ENGLISH";
+    case SetCharacter: return kCharacters[std::max(0, std::min(kCharacterCount - 1, s.character))].name;
+    case SetShadows: return lang::t(shadowNames[std::max(0, std::min(2, s.shadows))]);
+    case SetFps: return lang::t(s.fpsCounter ? lang::On : lang::Off);
+    default: return std::string();
+    }
+}
+
+// a small triangle, so "there is more above/below" needs no new texture on any of the three platforms
+static void scrollArrow(Renderer &renderer, int cx, int y, bool up)
+{
+    const int steps = 5;
+    for (int i = 0; i < steps; i++) {
+        const int half = up ? i + 1 : steps - i;
+        renderer.drawOverlayRect(mreal(cx - half * 2), mreal(y + i * 3), mreal(half * 4), mreal(3), 1, 1, 1, 1);
+    }
+}
+
 void Screens::drawSettings(Renderer &renderer, TextRenderer &text, int w, int h)
 {
     static const UserSettings defaults;
@@ -274,24 +379,32 @@ void Screens::drawSettings(Renderer &renderer, TextRenderer &text, int w, int h)
     text.drawOutlined(renderer, "B", 14 + (48 - text.width("B", 12)) / 2, 60, 12, kWhite, 2, kBlack);
     centred(renderer, text, lang::t(lang::Settings), w, 40, 32, kWhite, 3);
 
-    static const lang::Str shadowNames[] = {lang::Full, lang::Simple, lang::Off};
-    const lang::Str labelIds[7] = {lang::Sounds, lang::Music,    lang::Shadows,  lang::FpsCounter,
-                                   lang::View,   lang::Language, lang::Character};
-    const std::string values[7] = {toString(s.volume),
-                                   toString(s.music),
-                                   lang::t(shadowNames[std::max(0, std::min(2, s.shadows))]),
-                                   lang::t(s.fpsCounter ? lang::On : lang::Off),
-                                   lang::t(s.framing ? lang::Wide : lang::Normal),
-                                   s.language ? "POLSKI" : "ENGLISH",
-                                   kCharacters[std::max(0, std::min(kCharacterCount - 1, s.character))].name};
-    const int left = 96, right = w - 96, size = 18;
-    for (int i = 0; i < 7; i++) {
-        const int y = 96 + i * 42;
+    SettingsItem items[SetItemCount];
+    const int count = settingsItems(s, items);
+    const int rows = visibleRows(h);
+    if (cursor_ >= count) cursor_ = count - 1;
+    if (cursor_ < 0) cursor_ = 0;
+    if (cursor_ < scrollTop_) scrollTop_ = cursor_;
+    if (cursor_ >= scrollTop_ + rows) scrollTop_ = cursor_ - rows + 1;
+    if (scrollTop_ > count - rows) scrollTop_ = count - rows;
+    if (scrollTop_ < 0) scrollTop_ = 0;
+
+    const int left = 96, right = w - 96, size = 18, top = 96, step = 42;
+    for (int r = 0; r < rows && scrollTop_ + r < count; r++) {
+        const int i = scrollTop_ + r;
+        const int y = top + r * step;
         const Rgba c = i == cursor_ ? kYellow : kWhite;
-        text.drawOutlined(renderer, lang::t(labelIds[i]), left, y, size, c, 2, kBlack);
-        text.drawOutlined(renderer, values[i], right - text.width(values[i], size), y, size, c, 2, kBlack);
+        if (items[i] == SetBack) {
+            centred(renderer, text, lang::t(lang::Back), w, y, size, c, 2);
+            continue;
+        }
+        const std::string label = lang::t(settingsLabel(items[i]));
+        const std::string value = settingsValue(items[i], s);
+        text.drawOutlined(renderer, label, left, y, size, c, 2, kBlack);
+        text.drawOutlined(renderer, value, right - text.width(value, size), y, size, c, 2, kBlack);
     }
-    centred(renderer, text, lang::t(lang::Back), w, 96 + 7 * 42, size, cursor_ == 7 ? kYellow : kWhite, 2);
+    if (scrollTop_ > 0) scrollArrow(renderer, w / 2, top - 24, true);
+    if (scrollTop_ + rows < count) scrollArrow(renderer, w / 2, top + rows * step - 16, false);
     centred(renderer, text, lang::t(lang::HintSettings), w, h - 30, 12, kWhite, 2);
 }
 
@@ -331,6 +444,14 @@ void Screens::drawGameOver(Renderer &renderer, TextRenderer &text, const Game &g
         titles[1] = game.levelDone() ? lang::t(lang::LevelDone) : toString(passed) + "/" + toString(total);
         titles[2] = game.levelDone() ? std::string(lang::t(lang::NewRank)) + " : " + rankName(game.level())
                                      : lang::t(lang::TryAgain);
+    } else if (game.playerCount() > 1) {
+        // O23: Classic with two players is a duel, so the end of it says who won rather than what the record is
+        const int winner = game.winner();
+        titles[0] = std::string(lang::t(lang::PlayerOne)) + " - " + toString(game.score(0));
+        titles[1] = std::string(lang::t(lang::PlayerTwo)) + " - " + toString(game.score(1));
+        titles[2] = winner < 0 ? std::string(lang::t(lang::Draw))
+                               : std::string(lang::t(winner == 0 ? lang::PlayerOne : lang::PlayerTwo)) + " " +
+                                     lang::t(lang::Wins);
     } else {
         const bool newBest = game.score() > bestAtStart_;
         titles[0] = std::string(lang::t(lang::Score)) + " " + toString(game.score());
