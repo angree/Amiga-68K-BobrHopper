@@ -62,9 +62,10 @@ bool Screens::handleHome(const Input &in, MenuResult &out)
         used = true;
     }
     if (in.pressed(ActUp) || in.pressed(ActDown)) {
-        int &cursor = homePage_ == HomePage::Modes    ? homeCursor_
-                      : homePage_ == HomePage::Career ? careerCursor_
-                                                      : confirmCursor_;
+        int &cursor = homePage_ == HomePage::Modes     ? homeCursor_
+                      : homePage_ == HomePage::Players ? playersCursor_
+                      : homePage_ == HomePage::Career  ? careerCursor_
+                                                       : confirmCursor_;
         cursor = 1 - cursor; // every page has two items
         used = true;
     }
@@ -72,7 +73,9 @@ bool Screens::handleHome(const Input &in, MenuResult &out)
         used = true;
         if (homePage_ != HomePage::Modes) {
             sound("button_out");
-            homePage_ = homePage_ == HomePage::Confirm ? HomePage::Career : HomePage::Modes;
+            homePage_ = homePage_ == HomePage::Confirm  ? HomePage::Career
+                        : homePage_ == HomePage::Career ? (askingPlayers() ? HomePage::Players : HomePage::Modes)
+                                                        : HomePage::Modes;
             pageTime_ = 0;
         }
     }
@@ -81,9 +84,26 @@ bool Screens::handleHome(const Input &in, MenuResult &out)
         used = true;
         switch (homePage_) {
         case HomePage::Modes:
-            if (homeCursor_ == 0) {
+            // O24: with "ask on start" the mode is remembered and the screen asks how many play first
+            pendingMode_ = homeCursor_;
+            if (askingPlayers()) {
+                homePage_ = HomePage::Players;
+                playersCursor_ = settings && settings->players > 1 ? 1 : 0; // the last answer, as the default
+                pageTime_ = 0;
+            } else if (homeCursor_ == 0) {
                 out.startLevel = 0; // Classic: the endless game
             } else {
+                homePage_ = HomePage::Career;
+                careerCursor_ = 0;
+                pageTime_ = 0;
+            }
+            break;
+        case HomePage::Players:
+            out.players = playersCursor_ + 1;
+            if (pendingMode_ == 0) {
+                out.startLevel = 0;
+            } else {
+                // the app has the answer now, so the career page below shows the right one of the two careers
                 homePage_ = HomePage::Career;
                 careerCursor_ = 0;
                 pageTime_ = 0;
@@ -189,11 +209,19 @@ bool Screens::handleInput(const Input &in, UserSettings &s, MenuResult &out)
     case SetCharacter: s.character = (s.character + dir + kCharacterCount) % kCharacterCount; break;
     // O23: one player or two. Turning the second one on also gives it a device of its own, because two players on
     // one set of keys cannot play.
-    case SetPlayers:
-        s.players = s.players == 1 ? 2 : 1;
-        if (s.players > 1 && controlCount > 1 && s.control[1] == s.control[0])
+    case SetPlayers: {
+        // three states in a row: one player, two players, ask every time. "Ask" keeps the last count, which is
+        // what the question offers as its default.
+        int state = s.askPlayers ? 2 : (s.players > 1 ? 1 : 0);
+        state = (state + dir + 3) % 3;
+        s.askPlayers = state == 2;
+        if (state == 0) s.players = 1;
+        else if (state == 1) s.players = 2;
+        if ((s.players > 1 || s.askPlayers) && controlCount > 1 && s.control[1] == s.control[0])
             s.control[1] = (s.control[0] + 1) % controlCount;
         break;
+    }
+    case SetRespawn: s.infiniteRespawn = !s.infiniteRespawn; break;
     case SetControl1:
     case SetControl2: {
         const int p = items[cursor_] == SetControl1 ? 0 : 1;
@@ -228,6 +256,7 @@ void Screens::update(const Game &game)
 {
     const int state = int(game.state());
     pageTime_ += kStep;
+    if (++blinkSteps_ >= kBlinkPeriod) blinkSteps_ = 0;
     if (fadeTime_ >= real(0)) {
         fadeTime_ += kStep;
         if (fadeTime_ > real(0.5)) fadeTime_ = real(-1);
@@ -268,10 +297,32 @@ void Screens::draw(Renderer &renderer, TextRenderer &text, const Game &game, int
 static const Rgba kWhite{1, 1, 1, 1}, kBlack{0, 0, 0, 1};
 static const Rgba kYellow{0xF8 / 255.0f, 0xE8 / 255.0f, 0x4D / 255.0f, 1}; // HomeScreen coins colour
 
+// O24 WHICH ROW IS SELECTED. It used to be yellow text where the others were white, and on the sky-blue menu
+// backdrop that is nearly invisible - the author, playing: "zolty napis zamiast bialego nie jest niemal widoczny".
+// The selected row now sits on a dark bar and keeps WHITE text, and the bar pulses between these two so the eye is
+// drawn to it. Both colours are already in the Amiga's ten-colour overlay palette (BH_UI_GO_A and BH_UI_GO_B in
+// src/amiga/ui_amiga.cpp), which is why the pulse is two hard colours and not a fade: that overlay snaps every
+// colour to the nearest it knows, so a smooth ramp would step anyway.
+//
+// BLUE, and deliberately not the purples. The home screen's two buttons are already 0x6A40EB and 0x6A8FEB, and my
+// first attempt pulsed through the first of those - so the selected button came out the same colour as the one
+// above it and a still frame said nothing at all about which was chosen. Nothing here shares the 0x6A red.
+// Both are dark enough for white text at either end of the pulse.
+static const mreal kSelBar[2][3] = {{0x36 / 255.0f, 0x40 / 255.0f, 0xEB / 255.0f},
+                                    {0x36 / 255.0f, 0x8F / 255.0f, 0xEB / 255.0f}};
+
 static void centred(Renderer &renderer, TextRenderer &text, const std::string &s, int w, int y, int size, Rgba color,
                     int outline)
 {
     text.drawOutlined(renderer, s, (w - text.width(s, size)) / 2, y, size, color, outline, kBlack);
+}
+
+// The bar under the selected row of a list, full width like the home screen's buttons so the two screens agree.
+void Screens::selectionBar(Renderer &renderer, int w, int y, int size)
+{
+    const mreal *c = kSelBar[blinkOn() ? 0 : 1];
+    const int pad = 6, h = size + pad * 2;
+    renderer.drawOverlayRect(0, mreal(y - pad), mreal(w), mreal(h), c[0], c[1], c[2], 1);
 }
 
 // index.tsx isPaused overlay / SettingsScreen container: rgba(105, 201, 230, 0.8)
@@ -285,8 +336,11 @@ void Screens::drawPause(Renderer &renderer, TextRenderer &text, int w, int h)
     menuBackground(renderer, w, h);
     centred(renderer, text, lang::t(lang::Paused), w, 96, 32, kWhite, 3);
     const lang::Str items[4] = {lang::Resume, lang::Settings, lang::MenuItem, lang::Exit};
-    for (int i = 0; i < 4; i++)
-        centred(renderer, text, lang::t(items[i]), w, 180 + i * 44, 18, i == cursor_ ? kYellow : kWhite, 2);
+    for (int i = 0; i < 4; i++) {
+        const int y = 180 + i * 44;
+        if (i == cursor_) selectionBar(renderer, w, y, 18);
+        centred(renderer, text, lang::t(items[i]), w, y, 18, kWhite, 2);
+    }
     centred(renderer, text, lang::t(lang::HintPause), w, h - 30, 12, kWhite, 2);
 }
 
@@ -299,8 +353,11 @@ int Screens::settingsItems(const UserSettings &s, SettingsItem *out) const
     if (controlNames && controlCount > 1) {
         out[n++] = SetPlayers;
         out[n++] = SetControl1;
-        if (s.players > 1) out[n++] = SetControl2;
+        // the second player's device is worth showing whenever two can play - including "ask on start", where the
+        // answer is not known until a game begins
+        if (s.players > 1 || s.askPlayers) out[n++] = SetControl2;
     }
+    out[n++] = SetRespawn;
     out[n++] = SetSounds;
     out[n++] = SetMusic;
     out[n++] = SetView;
@@ -324,6 +381,7 @@ lang::Str Screens::settingsLabel(SettingsItem item)
 {
     switch (item) {
     case SetPlayers: return lang::Players;
+    case SetRespawn: return lang::Respawn;
     case SetControl1: return lang::ControlP1;
     case SetControl2: return lang::ControlP2;
     case SetSounds: return lang::Sounds;
@@ -341,7 +399,9 @@ std::string Screens::settingsValue(SettingsItem item, const UserSettings &s) con
 {
     static const lang::Str shadowNames[] = {lang::Full, lang::Simple, lang::Off};
     switch (item) {
-    case SetPlayers: return lang::t(s.players > 1 ? lang::TwoPlayers : lang::OnePlayer);
+    case SetPlayers:
+        return lang::t(s.askPlayers ? lang::AskOnStart : s.players > 1 ? lang::TwoPlayers : lang::OnePlayer);
+    case SetRespawn: return lang::t(s.infiniteRespawn ? lang::On : lang::Off);
     case SetControl1:
     case SetControl2: {
         const int p = item == SetControl1 ? 0 : 1;
@@ -393,15 +453,15 @@ void Screens::drawSettings(Renderer &renderer, TextRenderer &text, int w, int h)
     for (int r = 0; r < rows && scrollTop_ + r < count; r++) {
         const int i = scrollTop_ + r;
         const int y = top + r * step;
-        const Rgba c = i == cursor_ ? kYellow : kWhite;
+        if (i == cursor_) selectionBar(renderer, w, y, size);
         if (items[i] == SetBack) {
-            centred(renderer, text, lang::t(lang::Back), w, y, size, c, 2);
+            centred(renderer, text, lang::t(lang::Back), w, y, size, kWhite, 2);
             continue;
         }
         const std::string label = lang::t(settingsLabel(items[i]));
         const std::string value = settingsValue(items[i], s);
-        text.drawOutlined(renderer, label, left, y, size, c, 2, kBlack);
-        text.drawOutlined(renderer, value, right - text.width(value, size), y, size, c, 2, kBlack);
+        text.drawOutlined(renderer, label, left, y, size, kWhite, 2, kBlack);
+        text.drawOutlined(renderer, value, right - text.width(value, size), y, size, kWhite, 2, kBlack);
     }
     if (scrollTop_ > 0) scrollArrow(renderer, w / 2, top - 24, true);
     if (scrollTop_ + rows < count) scrollArrow(renderer, w / 2, top + rows * step - 16, false);
@@ -523,12 +583,13 @@ void Screens::drawMenuBars(Renderer &renderer, TextRenderer &text, const std::st
         if (scaleY <= real(0)) continue;
         const real barTop = real(top + i * (barH + gap));
         const real hh = real(barH) * scaleY;
-        const mreal *c = colors[i % 2];
+        // O24: the chosen button is the one whose BAR pulses; the labels are all white now. Yellow-on-blue text was
+        // what the author could not pick out ("zolty napis ... nie jest niemal widoczny").
+        const mreal *c = i == cursor ? kSelBar[blinkOn() ? 0 : 1] : colors[i % 2];
         renderer.drawOverlayRect(0, mreal(barTop + (real(barH) - hh) / real(2)), mreal(w), mreal(hh), c[0], c[1], c[2],
                                  1);
         if (v > real(0.2))
-            centred(renderer, text, labels[i], w, int(barTop) + (barH - text.lineHeight(size)) / 2, size,
-                    i == cursor ? kYellow : kWhite, 2);
+            centred(renderer, text, labels[i], w, int(barTop) + (barH - text.lineHeight(size)) / 2, size, kWhite, 2);
     }
 }
 
@@ -557,6 +618,15 @@ void Screens::drawHome(Renderer &renderer, TextRenderer &text, int w, int h)
         drawMenuBars(renderer, text, labels, 2, homeCursor_, w, barsTop);
         // above the credit line in the corner, which the hint used to run into
         centred(renderer, text, lang::t(lang::HintHome), w, h - 48, 12, kWhite, 2);
+    } else if (homePage_ == HomePage::Players) {
+        // O24: asked once, before a game starts, when the Players setting says "ask on start". The mode is already
+        // chosen, so the title says which one is being set up.
+        centred(renderer, text, lang::t(pendingMode_ == 0 ? lang::Classic : lang::Progression), w, barsTop - 56, 18,
+                kWhite, 2);
+        centred(renderer, text, lang::t(lang::HowMany), w, barsTop - 30, 14, kYellow, 2);
+        const std::string labels[2] = {lang::t(lang::OnePlayer), lang::t(lang::TwoPlayers)};
+        drawMenuBars(renderer, text, labels, 2, playersCursor_, w, barsTop);
+        centred(renderer, text, lang::t(lang::HintPlayers), w, h - 48, 12, kWhite, 2);
     } else if (homePage_ == HomePage::Career) {
         // O11.4: where the career stands — the level Continue starts and the rank the last finished level gave
         centred(renderer, text, std::string(lang::t(lang::Level)) + " " + levelLabel(careerLevel), w, barsTop - 56, 18,

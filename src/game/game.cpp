@@ -173,7 +173,7 @@ void Game::init()
         Player &h = heroes_[i];
         h.reset();
         h.carriedBy = h.carrying = nullptr;
-        h.respawnSteps = h.warnSteps = 0;
+        h.carryHopSteps = h.warnSteps = 0;
         // O23: two players start side by side, on the columns either side of the middle, so neither of them is
         // standing on the other before the game has even begun
         if (playerCount_ > 1) h.position().x = i == 0 ? real(-1) : real(1);
@@ -293,6 +293,14 @@ void Game::step()
     // frame (particles), the Animated fade. Timers (train light) fire after the frame.
     steps_++;
     heroReplaced_ = false;
+    // O24 endless retries: the level starts again here, before anything walks the scene or the map that this
+    // throws away. heroReplaced_ tells the renderers their hero objects are new ones.
+    if (pendingLevelRestart_) {
+        heroBefore_ = {heroes_[0].position(), heroes_[0].rotation(), heroes_[0].scale(), heroes_[0].isAlive,
+                       heroes_[0].moving, heroes_[0].ridingOn != nullptr, heroes_[0].hitBy != nullptr};
+        heroReplaced_ = true;
+        restartLevelNow();
+    }
     const uint64_t p0 = profileClock ? profileClock() : 0;
     gsap_.tick();
     const uint64_t p1 = profileClock ? profileClock() : 0;
@@ -314,10 +322,19 @@ void Game::step()
     if (playerCount_ > 1) {
         updateCarrying();
         updateGap();
-        updateRespawn();
     }
+    updateLevelRetry(); // O24: endless retries is a Progression rule, with one player as well as two
     forwardScene();
     runMicrotasks();
+    // O24 THE ONE STATE A PLAYER CANNOT GET OUT OF: every hero dead and the game still running - no game over
+    // screen, so no restart and no way back to the menu either ("obaj zgineli i nic sie nie dzialo"). Whatever
+    // leads there, it ends here.
+    //
+    // AFTER the microtasks, and that matters: a train death marks the hero dead at once but finishes the job in a
+    // microtask, so a watchdog placed before them saw everybody dead with nobody yet registered as coming back -
+    // and ended a level that infinite respawn was about to continue. isGameEnded() counts a player on its way
+    // back as still in the game, so this does not cut that short.
+    if (state_ == GameState::Playing && isGameEnded()) setState(GameState::GameOver);
     const uint64_t p3 = profileClock ? profileClock() : 0;
     if (profileClock) {
         stepProfile.gsap += int64_t(p1 - p0);
@@ -392,9 +409,13 @@ void Game::forwardScene()
 }
 
 // O23: over when nobody is left. With one player this is the original's `!hero.isAlive || state != playing`.
+// O24: a level waiting to start again is still IN the game - without this it ended the instant the last hero died
+// and endless retries never got a chance to run. levelRetrySteps_ is only ever set with that option on, so a game
+// without it behaves exactly as before.
 bool Game::isGameEnded() const
 {
     if (state_ != GameState::Playing) return true;
+    if (levelRetrySteps_ > 0 || pendingLevelRestart_) return false; // the level is about to start again
     for (int i = 0; i < playerCount_; i++)
         if (heroes_[i].isAlive) return false;
     return true;
@@ -413,7 +434,12 @@ void Game::checkIfUserHasFallenOutOfFrame(int player)
 void Game::outOfFrame(int player)
 {
     rumble();
-    if (playerCount_ > 1) {
+    // O24 K4.2: ...and with infinite respawn on, drifting off the side is a death like any other, so it brings the
+    // hero back instead of ending the level - the user's rule is that such a level ends only by being crossed or
+    // left through the menu. Two players always took this road; one player went straight to gameOver() and so could
+    // lose a level that was supposed to be unloseable. Classic and plain Progression keep the original's behaviour
+    // exactly, hero alive and all, which is what the recorded traces hold.
+    if (playerCount_ > 1 || (level_ > 0 && infiniteRespawn_)) {
         heroes_[player].isAlive = false; // the other player carries on
         endForPlayer(player);
     } else {
@@ -446,8 +472,18 @@ void Game::endForPlayer(int player)
         h.carriedBy->carrying = nullptr;
         h.carriedBy = nullptr;
     }
-    // Progression is co-operative: a dead player comes back on the partner's head a couple of seconds later
-    if (playerCount_ > 1 && level_ > 0) h.respawnSteps = settings::respawnSteps;
+    // O24 PROGRESSION, the user's rule three times over: "jak 1 gracz zginie to i drugi ginie i obaj sie resetuja
+    // na starcie - musza obaj przejsc". So one death ends the level for EVERYBODY and the level begins again from
+    // the first row, with both players back at the start. Endless retries does not change WHERE they come back -
+    // it decides whether the level starts again by itself, for as long as it takes, or whether this is a game over
+    // and the player chooses. Nobody is ever put back down in the middle of a level, and nobody lands on the
+    // partner's head: that was my own invention and the author rejected it three times.
+    // Classic is untouched - it is about records, so dead is dead.
+    if (level_ > 0) {
+        endLevelForEveryone();
+        if (infiniteRespawn_ && levelRetrySteps_ == 0 && !pendingLevelRestart_)
+            levelRetrySteps_ = settings::respawnSteps;
+    }
     if (isGameEnded()) setState(GameState::GameOver); // onGameEnded
 }
 
@@ -670,8 +706,19 @@ void Game::moveWithDirection(Swipe direction, int player)
     if (interrupted && !ctx_.originalBehaviour) {
         const RowRef *landed = map_->getRow(jsRound(h.position().z));
         if (landed && landed->type == RowType::Water && !landed->water->getRidableForPosition(h.position())) {
+            // O24 K4.2: `who` was missing here - this is O12's drowning, written when there was only ever one hero,
+            // and a collision with no `who` means the FIRST player. So player two chaining hops into a river drowned
+            // player one instead, wherever it stood; and with player one already dead the collision was refused
+            // outright (playerBlocked), which left player two alive in the water. Either way the hop below never
+            // runs, so `moving` stays true from skipPendingMovement(): the water then skips that hero for ever
+            // (it only drowns one that stands still), nobody is left to kill, and the game sits in Playing with no
+            // game over and no reset - the user's report, "obaj wpadli do wody i sie nie zresetowalo ani game over
+            // ani nic". `moving` is cleared here rather than trusting the death to do it, so a refused collision
+            // can never freeze a hero again.
+            h.moving = false;
             Collision c;
             c.type = "water";
+            c.who = &h;
             ctx_.onCollide(c);
             return;
         }
@@ -763,6 +810,46 @@ void Game::moveWithDirection(Swipe direction, int player)
 // None of this exists in the original - the upstream game has a multiplayer BUTTON on its home screen wired to an
 // empty function and nothing behind it. These are the user's rules, written down in docs/PLAN_2PLAYERS.md.
 
+// O24: a player MOVED onto the other's head by a rule - the co-op pull-back, or both landing on one tile - used to
+// be put there by setting its position, so it simply appeared up there with nothing in between ("postac gracza sie
+// pojawia na glowie bez animacji", reported by the author and by their brother, on all three platforms). It hops
+// now: the same arc, squash and rotation a hop of its own would draw (Player::commitMovementAnimations), so the two
+// look alike. `carryHopSteps` keeps updateCarrying from snapping the position while the arc is in the air.
+void Game::hopOntoHead(int player, int partner)
+{
+    Player &h = heroes_[player], &p = heroes_[partner];
+    h.stopAnimations(ctx_);
+    ctx_.gsap->killTweensOf(&h.position());
+    ctx_.gsap->killTweensOf(&h.scale());
+    h.moving = false;
+    h.hitBy = nullptr;
+    h.ridingOn = nullptr;
+    h.initialPosition = std::make_shared<Vec3>(h.position());
+    h.targetPosition = std::make_shared<Vec3>(p.position().x, p.position().y + real(settings::headHeight),
+                                              p.position().z);
+    h.carryHopSteps = kCarryHopSteps;
+    const real t = settings::baseAnimationTime;
+    const Vec3 &i0 = *h.initialPosition;
+    const Vec3 &t0 = *h.targetPosition;
+    gsap::Vars po;
+    // the arc says when it has landed; kCarryHopSteps is only a backstop, so a tween killed in mid-air by the next
+    // rule cannot leave the player floating for ever
+    po.onComplete = [this, player]() { heroes_[player].carryHopSteps = 0; };
+    std::shared_ptr<gsap::Timeline> pos = ctx_.gsap->timeline(po);
+    pos->to(&h.position(),
+            {{'x', i0.x + (t0.x - i0.x) * real(0.75)}, {'y', t0.y + real(0.5)},
+             {'z', i0.z + (t0.z - i0.z) * real(0.75)}},
+            t)
+        .to(&h.position(), {{'x', t0.x}, {'y', t0.y}, {'z', t0.z}}, t);
+    std::shared_ptr<gsap::Timeline> sc = ctx_.gsap->timeline();
+    sc->to(&h.scale(), {{'x', 1}, {'y', 1.2}, {'z', 1}}, t)
+        .to(&h.scale(), {{'x', 1}, {'y', 0.8}, {'z', 1}}, t)
+        .to(&h.scale(), {{'x', 1}, {'y', 1}, {'z', 1}}, t, gsap::Vars().withEase(gsap::BounceOut()));
+    h.setAnimations({pos, sc});
+    h.carriedBy = &p;
+    p.carrying = &h;
+}
+
 // One player stands on the other's head and rides along with it. The moment the lower one hops away it "escapes and
 // leaves the other behind", so the two can play independently again.
 void Game::updateCarrying()
@@ -774,9 +861,14 @@ void Game::updateCarrying()
         if (under->moving || !under->isAlive) {
             h.carriedBy = nullptr;
             under->carrying = nullptr;
+            h.carryHopSteps = 0;
             landAfterCarry(i);
             continue;
         }
+        // still in the air on its way up there: the arc owns the position until it lands. On the step the backstop
+        // runs out we fall THROUGH to the snap below rather than waiting another step, or a player whose arc was
+        // killed in mid-air sits off its carrier's tile for a frame.
+        if (h.carryHopSteps > 0 && --h.carryHopSteps > 0) continue;
         h.position().x = under->position().x;
         h.position().z = under->position().z;
         h.position().y = under->position().y + real(settings::headHeight);
@@ -800,13 +892,7 @@ void Game::stackOnOneTile()
     if (jsRound(a.position().z) != jsRound(b.position().z)) return;
     if (rabs(a.position().x - b.position().x) >= real(0.5)) return;
     const int top = a.position().y >= b.position().y ? 0 : 1;
-    Player &upper = heroes_[top], &lower = heroes_[top == 0 ? 1 : 0];
-    upper.carriedBy = &lower;
-    lower.carrying = &upper;
-    upper.position().x = lower.position().x;
-    upper.position().z = lower.position().z;
-    upper.position().y = lower.position().y + real(settings::headHeight);
-    if (upper.initialPosition) *upper.initialPosition = upper.position();
+    hopOntoHead(top, top == 0 ? 1 : 0);
 }
 
 void Game::landAfterCarry(int player)
@@ -850,56 +936,60 @@ void Game::updateGap()
 
 void Game::pullBack(int front, int back)
 {
-    Player &f = heroes_[front], &b = heroes_[back];
-    f.moving = false;
-    f.stopAnimations(ctx_);
-    ctx_.gsap->killTweensOf(&f.position());
-    f.ridingOn = nullptr;
-    f.hitBy = nullptr;
-    f.position().set(b.position().x, b.position().y + real(settings::headHeight), b.position().z);
-    f.initialPosition = std::make_shared<Vec3>(f.position());
-    f.targetPosition = f.initialPosition;
-    f.carriedBy = &b;
-    b.carrying = &f;
-    f.warnSteps = b.warnSteps = 0;
+    hopOntoHead(front, back); // O24: an arc back to the partner, not a jump cut
+    heroes_[front].warnSteps = heroes_[back].warnSteps = 0;
     sounds_.push_back("banner");
 }
 
-void Game::updateRespawn()
+// The pause between everybody going down and the level starting again, so the death is seen before the screen
+// changes. Only Progression with endless retries ever has one.
+void Game::updateLevelRetry()
 {
-    if (level_ == 0 || state_ != GameState::Playing) return;
+    if (state_ != GameState::Playing) return;
+    // Switched off in the pause menu while a restart was pending: nothing is coming, so the wait is cancelled
+    // rather than left to hold the game open with every hero dead (K1 - that hung the game once already).
+    if (level_ == 0 || !infiniteRespawn_) {
+        levelRetrySteps_ = 0;
+        return;
+    }
+    if (levelRetrySteps_ > 0 && --levelRetrySteps_ == 0) pendingLevelRestart_ = true;
+}
+
+// The level from the first row again, both players on the starting row. This is setLevel()'s own rebuild, which is
+// what the app does to start a level in the first place, so a retry lands the player exactly where a fresh start
+// would. Called at the TOP of step(), never in the middle of one: it throws away the scene and the map that the
+// rest of the step is walking.
+void Game::restartLevelNow()
+{
+    pendingLevelRestart_ = false;
+    levelRetrySteps_ = 0;
+    setupGame(character_);
+    init();
+    state_ = GameState::Playing; // at once: init() leaves no intermediate state for anything to observe
+    pendingState_ = false;
+    for (int i = 0; i < playerCount_; i++) heroes_[i].stopIdle(ctx_);
+}
+
+// Everybody goes down together, and the level starts again from the beginning. Called for the OTHER players only:
+// the one that actually died has already been dealt with.
+void Game::endLevelForEveryone()
+{
     for (int i = 0; i < playerCount_; i++) {
         Player &h = heroes_[i];
-        if (h.isAlive || h.respawnSteps <= 0) continue;
-        const int partner = i == 0 ? 1 : 0;
-        if (!heroes_[partner].isAlive) continue; // nothing to come back to; the game has ended anyway
-        if (--h.respawnSteps == 0) reviveOnPartner(i, partner);
+        if (!h.isAlive) continue;
+        h.isAlive = false;
+        h.moving = false;
+        h.stopIdle(ctx_);
+        h.stopAnimations(ctx_);
+        if (h.carrying) {
+            h.carrying->carriedBy = nullptr;
+            h.carrying = nullptr;
+        }
+        if (h.carriedBy) {
+            h.carriedBy->carrying = nullptr;
+            h.carriedBy = nullptr;
+        }
     }
-}
-
-void Game::reviveOnPartner(int player, int partner)
-{
-    Player &h = heroes_[player], &p = heroes_[partner];
-    h.stopAnimations(ctx_);
-    // the death tweens were started on the scale and rotation directly, so pausing the hop animations is not enough
-    ctx_.gsap->killTweensOf(&h.position());
-    ctx_.gsap->killTweensOf(&h.rotation());
-    ctx_.gsap->killTweensOf(&h.scale());
-    h.isAlive = true;
-    h.moving = false;
-    h.hitBy = nullptr;
-    h.ridingOn = nullptr;
-    h.respawnSteps = 0;
-    h.warnSteps = 0;
-    h.scale().set(1, 1, 1);
-    h.rotation().set(0, 0, 0);
-    h.targetRotation = 0;
-    h.position().set(p.position().x, p.position().y + real(settings::headHeight), p.position().z);
-    h.initialPosition = std::make_shared<Vec3>(h.position());
-    h.targetPosition = h.initialPosition;
-    h.carriedBy = &p;
-    p.carrying = &h;
-    sounds_.push_back("banner");
 }
 
 } // namespace cr

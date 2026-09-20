@@ -8,8 +8,9 @@
 # The emulator is started ONLY when none of ours is running, or with -Restart (a changed .uae, a hung guest).
 #
 # Usage:
-#   bh_go.ps1                                          # (re)start the game for the user
+#   bh_go.ps1                                          # (re)start the game for the user - clears any bot file
 #   bh_go.ps1 -WaitFor 'hero died' -TimeoutSec 300     # and wait for a line in the log
+#   bh_go.ps1 -Auto classic -WaitFor 'hero died'       # a BOT run (classic|prog|menu|solo|ask), profiling and all
 #   bh_go.ps1 -Command 'BobrHopperPrefs GFX=RTG'       # any AmigaDOS command line (runs in Work:)
 param(
   [string]$Command = "bobrhopper >Work:bh.log",
@@ -17,7 +18,15 @@ param(
   [string]$Log = "bh.log",
   [string]$WaitFor = "",
   [int]$TimeoutSec = 120,
-  [switch]$Restart
+  [switch]$Restart,
+  # A BOT RUN, and nothing else may leave one behind. autoplay.txt does more than press keys: it turns on
+  # profiling, writes a full 76 KB screen dump to disk at every milestone and prints a census of every object -
+  # seconds of standing still on a real Amiga - and it stops the game once the milestones are done. The author
+  # sat down to play a build I had tested, and got a second player moving by itself, long freezes every so often,
+  # and a game that quit after half a minute. Every one of those was my leftover file, not the game. So a plain
+  # start now CLEARS it, and a bot run has to ask for one by name.
+  [ValidateSet("", "classic", "prog", "menu", "solo", "ask")]
+  [string]$Auto = ""
 )
 
 $exe  = "C:\temp\amiga_bobr\uae\winuae-bh.exe"
@@ -34,6 +43,22 @@ function Get-Ours {
 # AmigaDOS scripts must be LF: a CR becomes part of the last word of the line.
 function Write-Lf([string]$path, [string]$text) {
   [System.IO.File]::WriteAllText($path, ($text -replace "`r", ""), [System.Text.Encoding]::ASCII)
+}
+
+# The bot files live in the game's own folder, so they outlive the run that made them. Settle them BEFORE the
+# game is asked to start, never after (see -Auto above).
+$autoPath = Join-Path $work "autoplay.txt"
+$profPath = Join-Path $work "profile.txt"
+if ($Auto -ne "") {
+  Write-Lf $autoPath $Auto
+  Write-Host "bh_go: autoplay.txt = '$Auto' - THIS IS A BOT RUN, not a game to hand to anybody"
+} else {
+  foreach ($p in @($autoPath, $profPath)) {
+    if (Test-Path $p) {
+      Remove-Item $p -Force
+      Write-Host "bh_go: removed $(Split-Path $p -Leaf) left behind by an earlier test"
+    }
+  }
 }
 
 $ours = @(Get-Ours)

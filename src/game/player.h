@@ -34,8 +34,11 @@ public:
     // carrier's x and z every step, so it rides along on a log and falls behind the moment the carrier hops away.
     Player *carriedBy = nullptr;
     Player *carrying = nullptr;
-    // Progression 2P: steps left before a dead player is put back on the partner's head (0 = not waiting)
-    int respawnSteps = 0;
+    // O24: this player is in the middle of being MOVED onto the other's head by a rule rather than by its own hop
+    // (the co-op pull-back, or two landing on one tile). While it counts down the little arc owns the position and
+    // updateCarrying leaves it alone - without this the player simply appeared up there, which is what the author
+    // and their brother both reported: "postac gracza sie pojawia na glowie bez animacji".
+    int carryHopSteps = 0;
     // Classic 2P: steps this player has been at the edge of the frame, blinking before it falls behind for good
     int warnSteps = 0;
 
@@ -59,6 +62,9 @@ public:
     void stopIdle(GameContext &ctx);
     void idle(GameContext &ctx);
     void commitMovementAnimations(GameContext &ctx, std::function<void()> onComplete);
+    // O24: the animations of a move this player did not make itself (Game::hopOntoHead), so the next hop stops them
+    // the same way it stops its own
+    void setAnimations(std::vector<std::shared_ptr<gsap::Animation>> a) { animations_ = a; }
     void runPosieAnimation(GameContext &ctx);
 
     void collideWithCar(GameContext &ctx, RoadRow &road, RowEntity &car);

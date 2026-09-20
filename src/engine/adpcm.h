@@ -1,5 +1,5 @@
 // Microsoft ADPCM (WAV format 2), mono: integer decoding and a looping reader streamed from a file, for the SF2000
-// music (task C2.3; the approach of the user's SF2000 game Santa, which streams its music this way). Built by
+// music (task C2.3; the approach taken by another SF2000 game that streams its music this way). Built by
 // tools/bake_music_adpcm.py; decoding matches ffmpeg's adpcm_ms decoder sample for sample (tests/test_sw_audio.cpp).
 #pragma once
 

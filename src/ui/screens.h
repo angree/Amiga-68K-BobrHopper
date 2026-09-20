@@ -49,10 +49,18 @@ struct UserSettings {
     // hands their names to Screens::controlNames - so this screen works the same on a keyboard and on a console.
     int players = 1;
     int control[2] = {0, 1};
+    // O24: instead of forcing one or two in here, the Players entry has a third state - the home screen then asks
+    // how many, every time, and `players` above is the answer it remembers.
+    bool askPlayers = false;
+    // O24: Progression until it is beaten. A dead player comes back instead of the level ending.
+    bool infiniteRespawn = false;
 };
 
 struct MenuResult {
     bool resume = false, quitToHome = false, exitGame = false, settingsChanged = false;
+    // O24: the home screen asked how many play and got an answer (0 = it did not ask). The app applies this
+    // BEFORE startLevel, because the player count decides the map and which career is being continued.
+    int players = 0;
     // O11.2: the home screen picked a game — 0 = Classic, k > 0 = Progression level k; -1 = nothing picked
     int startLevel = -1;
     // O11.4: New Game was confirmed, so the saved Progression progress goes back to level 1
@@ -64,8 +72,8 @@ enum class Menu { None, Pause, Settings };
 // O23: the settings screen is a SCROLLING list now - the two control entries do not fit on one screenful, and the
 // user asked for exactly this ("musimy chyba zrobic przewijane menu"). The order is the order they are shown in.
 enum SettingsItem {
-    SetPlayers, SetControl1, SetControl2, SetSounds, SetMusic, SetView, SetLanguage, SetCharacter, SetShadows,
-    SetFps, SetBack, SetItemCount
+    SetPlayers, SetControl1, SetControl2, SetRespawn, SetSounds, SetMusic, SetView, SetLanguage, SetCharacter,
+    SetShadows, SetFps, SetBack, SetItemCount
 };
 
 class Screens {
@@ -108,29 +116,41 @@ private:
     // O11.2: the game over screen's banners, in the home screen's colours, as menu items
     void drawMenuBars(Renderer &renderer, TextRenderer &text, const std::string *labels, int count, int cursor, int w,
                       int top);
+    // O24: the pulsing bar that marks the selected row of the pause and settings lists
+    void selectionBar(Renderer &renderer, int w, int y, int size);
     bool handleHome(const Input &input, MenuResult &out);
     // O23: which entries the settings screen shows right now (the second control only with two players, and no
     // control entries at all when the platform offers one device); returns how many
     int settingsItems(const UserSettings &s, SettingsItem *out) const;
     // how many rows of the list fit between the title and the hint line
     static int visibleRows(int h);
+    // O24: does the home screen ask how many play before a game starts?
+    bool askingPlayers() const { return settings && settings->askPlayers; }
     static lang::Str settingsLabel(SettingsItem item);
     std::string settingsValue(SettingsItem item, const UserSettings &s) const;
 
     // O11.2/O11.4: what the home screen shows — the two modes, the career menu behind Progression, and the
     // confirmation New Game needs before the saved progress goes
-    enum class HomePage { Modes, Career, Confirm };
+    // O24: Players sits between the modes and the career, so by the time the career page appears the game knows
+    // which of the two careers (one player or two) it is showing.
+    enum class HomePage { Modes, Players, Career, Confirm };
 
     Menu menu_ = Menu::None;
     bool settingsFromPause_ = false;
     int cursor_ = 0;
     int scrollTop_ = 0; // O23: first list row on screen
     HomePage homePage_ = HomePage::Modes;
-    int homeCursor_ = 0, careerCursor_ = 0, confirmCursor_ = 0;
+    int homeCursor_ = 0, careerCursor_ = 0, confirmCursor_ = 0, playersCursor_ = 0;
+    int pendingMode_ = 0; // O24: which mode the Players page is answering for (0 Classic, 1 Progression)
     GpuTexture title_, buttonPlay_, buttonSettings_, buttonBack_;
     int lastState_ = -1;
     real stateTime_ = 0;   // seconds since the game state last changed
     real pageTime_ = 0;    // seconds since the home screen's page last changed (the bars' entry)
+    // O24: the selected row's bar pulses between two colours so the eye finds it. A plain counter of logic steps,
+    // not a time in seconds: it never overflows 16.16 fixed point, however long a menu is left open.
+    int blinkSteps_ = 0;
+    static const int kBlinkPeriod = 30; // steps; 30 at 60 Hz is two full pulses a second
+    bool blinkOn() const { return blinkSteps_ < kBlinkPeriod / 2; }
     int homeVisits_ = 0;   // HomeScreen mounts
     int bestAtStart_ = 0;  // highscore when the current game started (NEW BEST)
     real fadeTime_ = -1;   // seconds into the restart fade, -1 = none

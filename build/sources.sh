@@ -27,6 +27,8 @@ sources_for() {
     test_easing) echo "tests/test_easing.cpp" ;;
     test_fixed) echo "tests/test_fixed.cpp" ;;
     # O23: Input's per-device masks (a device must be only itself) and playerDevice
+    # O23: two SDL pads, one per player - uses SDL virtual joysticks, so PC only (the device's SDL 2.0.9 has none)
+    test_two_pads) echo "tests/test_two_pads.cpp src/engine/input.cpp src/engine/input_sdl.cpp src/engine/log.cpp src/ui/controls.cpp src/ui/screens.cpp src/ui/lang.cpp src/ui/ranks.cpp $GAME src/engine/math.cpp src/engine/assets.cpp src/engine/gsap.cpp src/engine/text.cpp src/engine/renderer.cpp src/engine/gl_api.cpp src/engine/platform_paths_sdl.cpp" ;;
     test_input) echo "tests/test_input.cpp src/engine/input.cpp src/ui/controls.cpp src/ui/screens.cpp src/ui/lang.cpp src/ui/ranks.cpp src/engine/log.cpp $GAME src/engine/math.cpp src/engine/assets.cpp src/engine/gsap.cpp src/engine/text.cpp src/engine/renderer.cpp src/engine/gl_api.cpp src/engine/platform_paths_sdl.cpp" ;;
     # SF2000 software renderer tests: build_pc.sh adds -DCR_FIXED for test_sw_*
     test_sw_math) echo "tests/test_sw_math.cpp $SW $SW_DEPS" ;;

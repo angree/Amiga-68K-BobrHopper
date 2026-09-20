@@ -912,8 +912,18 @@ struct Session {
     bool haveSounds = false;
     std::vector<std::string> music; // manifest order: the title song first, then the game tracks
     std::map<std::string, std::string> conf;
-    int careerLevel = 1, pendingLevel = 0, musicState = -1, gameTrack = -1, loggedState = -1;
+    // O24: Progression keeps a career of its own for two players - it is a different game, played by two people.
+    // [0] is one player, [1] is two.
+    int careerLevel[2] = {1, 1};
+    int pendingLevel = 0, musicState = -1, gameTrack = -1, loggedState = -1;
+    int careerSlot() const { return settings.players > 1 ? 1 : 0; }
+    const char *careerKey() const { return careerSlot() ? "career_level_2p" : "career_level"; }
     bool careerDirty = false, settingsDirty = false, selectCombo = false, quit = false;
+    // O24: a game that is waiting for its sprite set. With "ask on start" the player count is only known when the
+    // home screen answers, and two players need the wide set - which cannot be swapped while a game is running.
+    // So the start is held for the frame or two the swap takes. 0 = nothing waiting, otherwise level + 1.
+    int pendingStart = 0;
+    bool wideNeeded() const { return settings.players > 1 || settings.framing == 1; }
     bool goArmA = false, goArmMenu = false, pendingClassic = false;
 
     // ---- the config: key=value lines next to the binary. stdio only (C++ streams never close on this libc), and
@@ -996,14 +1006,17 @@ struct Session {
         settings.control[1] = clampInt(getInt("control_p2", 2), 0, kControlCount - 1);
         if (settings.control[1] == settings.control[0])
             settings.control[1] = (settings.control[0] + 1) % kControlCount;
+        settings.askPlayers = getInt("ask_players", 0) != 0;
+        settings.infiniteRespawn = getInt("infinite_respawn", 0) != 0;
         const std::string character = conf.count("character") ? conf["character"] : std::string("beaver");
         for (int i = 0; i < kShippedCharacters; i++)
             if (character == kCharacters[i].id) settings.character = i;
-        careerLevel = getInt("career_level", 1) < 1 ? 1 : getInt("career_level", 1);
-        screens.careerLevel = careerLevel;
+        careerLevel[0] = getInt("career_level", 1) < 1 ? 1 : getInt("career_level", 1);
+        careerLevel[1] = getInt("career_level_2p", 1) < 1 ? 1 : getInt("career_level_2p", 1);
+        screens.careerLevel = careerLevel[careerSlot()];
         printf("config: volume=%d music=%d language=%d character=%s best=%d career=%d\n", settings.volume,
                settings.music, settings.language, kCharacters[settings.character].id, getInt("highscore", 0),
-               careerLevel);
+               careerLevel[careerSlot()]);
     }
     void saveSettings()
     {
@@ -1016,6 +1029,8 @@ struct Session {
         setInt("players", settings.players);
         setInt("control_p1", settings.control[0]);
         setInt("control_p2", settings.control[1]);
+        setInt("ask_players", settings.askPlayers ? 1 : 0);
+        setInt("infinite_respawn", settings.infiniteRespawn ? 1 : 0);
         conf["character"] = kCharacters[settings.character].id;
         if (game && game->highscore() > getInt("highscore", 0)) setInt("highscore", game->highscore());
         saveConf();
@@ -1026,6 +1041,7 @@ struct Session {
     void applySettings()
     {
         lang::set(settings.language);
+        if (game) game->setInfiniteRespawn(settings.infiniteRespawn); // O24: Progression until it is beaten
         if (board) board->master = settings.volume;
         if (haveSounds) bh_music_volume(musicVolume());
         // Shadows and View are kept as entries so the screen is the same seven lines as on the consoles; the
@@ -1062,6 +1078,13 @@ struct Session {
         MenuResult menu;
         const int characterBefore = settings.character;
         const bool menuInput = screens.handleInput(input, settings, menu);
+        // O24: the home screen asked how many play. Applied BEFORE startLevel below, because the count decides the
+        // map, the starting columns, which sprite set is needed and which of the two careers is on screen.
+        if (menu.players > 0) {
+            settings.players = menu.players;
+            screens.careerLevel = careerLevel[careerSlot()];
+            settingsDirty = true;
+        }
         if (settings.character >= kShippedCharacters) // see kShippedCharacters
             settings.character = settings.character > characterBefore ? 0 : kShippedCharacters - 1;
         if (menu.settingsChanged) {
@@ -1076,12 +1099,21 @@ struct Session {
         }
         if (menu.quitToHome) g.quitToHome();
         if (menu.exitGame) quit = true;
+        if (menu.startLevel >= 0 && !g.restarting() && wideNeeded() != gWide) {
+            // the set has to change first; the main loop does that on the title screen and this starts below
+            pendingStart = menu.startLevel + 1;
+            menu.startLevel = -1;
+        }
+        if (pendingStart > 0 && wideNeeded() == gWide && !g.restarting()) {
+            menu.startLevel = pendingStart - 1;
+            pendingStart = 0;
+        }
         if (menu.startLevel >= 0 && !g.restarting()) {
             g.setPlayerCount(settings.players); // O23: before the scene is built - the map and the start differ
             if (menu.resetCareer) {
-                careerLevel = 1;
-                screens.careerLevel = careerLevel;
-                setInt("career_level", careerLevel);
+                careerLevel[careerSlot()] = 1;
+                screens.careerLevel = 1;
+                setInt(careerKey(), 1);
                 saveConf();
             }
             g.setLevel(menu.startLevel);
@@ -1127,9 +1159,9 @@ struct Session {
         }
         screens.update(g);
         updateMusic();
-        if (g.levelDone() && g.level() >= careerLevel) {
-            careerLevel = g.level() + 1;
-            screens.careerLevel = careerLevel;
+        if (g.levelDone() && g.level() >= careerLevel[careerSlot()]) {
+            careerLevel[careerSlot()] = g.level() + 1;
+            screens.careerLevel = careerLevel[careerSlot()];
             careerDirty = true;
         }
         if (pendingLevel > 0 && !g.restarting() && g.state() == GameState::None) {
@@ -1145,7 +1177,7 @@ struct Session {
             pendingClassic = false;
         }
         if (careerDirty && g.state() != GameState::GameOver) {
-            setInt("career_level", careerLevel);
+            setInt(careerKey(), careerLevel[careerSlot()]);
             saveConf();
             careerDirty = false;
         }
@@ -1359,6 +1391,7 @@ struct AutoPlay {
     bool progression = false, wentDown = false;
     bool menuWalk = false; // "menu" in autoplay.txt: open the settings and step down the list, for screenshots
     bool soloKeys = false; // "solo" in autoplay.txt: press the arrows only, and see that player two stays put
+    bool askShot = false;  // "ask" in autoplay.txt: one press of A on the title, then nothing
 
     AutoPlay() : on(false), next(0), scripted(0), nextKey(120), hops(0), bot(1u), bot2(7u), maskPrev(0)
     {
@@ -1377,9 +1410,12 @@ struct AutoPlay {
                 // move. It exists because the user found the opposite by playing, and no unattended run could
                 // have caught it: there the bot IS the shared mask, so both looked alike.
                 if (word[0] == 's') soloKeys = true;
+                // "ask" presses A on the title once and then stops, which parks the game on whatever page that
+                // opens - the "how many players?" question, when the setting asks. For screenshots.
+                if (word[0] == 'a') askShot = true;
             }
             fclose(f);
-            on = !menuWalk && !soloKeys;
+            on = !menuWalk && !soloKeys && !askShot;
             scripted = 1; // one press of A, to get past the title screen into a game
             printf("game: autoplay is on - %s\n",
                    menuWalk ? "walking the settings list" : progression ? "hopping by itself (PROGRESSION)"
@@ -1654,7 +1690,17 @@ int main(void)
     uint16_t devHeld[5] = {0, 0, 0, 0, 0};
     uint16_t keysArrows = 0, keysWasd = 0;
     std::vector<Snapshot> queued;
+    int scriptFrames = 0; // steps of a startup script still to play, during which the bot presses nothing
     size_t queuedAt = 0;
+    if (autoplay.askShot) {
+        const uint16_t script[] = {0, ActA, 0, 0};
+        for (unsigned i = 0; i < sizeof(script) / sizeof(script[0]); i++)
+            for (int hold = 0; hold < 20; hold++) {
+                Snapshot snap;
+                for (int d = 0; d < 5; d++) snap.mask[d] = script[i];
+                queued.push_back(snap);
+            }
+    }
     if (autoplay.soloKeys) {
         // A on the title to start, then eight hops forward on the ARROWS device only. Device 1 is the arrows
         // (Session::controlNames), and mask[0] is what the whole keyboard would show.
@@ -1701,14 +1747,23 @@ int main(void)
     }
     if (autoplay.on && autoplay.progression) {
         // Progression from the title: down, A (the career page), A again (Continue) - then the bot takes over.
-        const uint16_t script[] = {0, ActDown, 0, ActA, 0, 0, 0, 0, 0, 0, ActA, 0};
-        for (unsigned i = 0; i < sizeof(script) / sizeof(script[0]); i++)
+        // Down to Progression, A, then A again for Continue. O24: when the settings ask how many play, that
+        // question sits between the two, so the script needs one more A.
+        const uint16_t asking[] = {0, ActDown, 0, ActA, 0, ActA, 0, 0, 0, 0, ActA, 0};
+        const uint16_t plain[] = {0, ActDown, 0, ActA, 0, 0, 0, 0, 0, 0, ActA, 0};
+        const uint16_t *script = session.settings.askPlayers ? asking : plain;
+        for (unsigned i = 0; i < sizeof(plain) / sizeof(plain[0]); i++)
             for (int hold = 0; hold < 30; hold++) {
                 Snapshot snap;
                 snap.mask[0] = script[i];
                 for (int d = 1; d < 5; d++) snap.mask[d] = script[i];
                 queued.push_back(snap);
             }
+        // ...and the bot keeps its hands off until the script has finished. Its own A press on the title screen
+        // was OR-ed into every step alongside the script, so it started Classic before the script had walked down
+        // to Progression - every "progression" run so far was silently a Classic one. The note in
+        // docs/LEFTOFF_AMIGA.md said to set the mode in the config instead; this fixes the race at its source.
+        scriptFrames = int(queued.size());
     }
 
     while (!session.quit && !windowClosed) {
@@ -1809,8 +1864,11 @@ int main(void)
                 if (queuedAt < queued.size()) snap = queued[queuedAt++];
                 // O23: each player's device gets its OWN bot, so an unattended two-player run really plays two
                 // games at once; every other device (and the menus) get the first bot, as before.
-                const uint16_t bot1 = autoplay.mask(game, 0);
-                const uint16_t bot2 = session.settings.players > 1 ? autoplay.mask(game, 1) : bot1;
+                // O24: silent while the startup script is still walking the menus - see scriptFrames.
+                const bool scripting = scriptFrames > 0 && scriptFrames-- > 0;
+                const uint16_t bot1 = scripting ? uint16_t(0) : autoplay.mask(game, 0);
+                const uint16_t bot2 = scripting ? uint16_t(0)
+                                    : session.settings.players > 1 ? autoplay.mask(game, 1) : bot1;
                 const int devP1 = playerDevice(session.settings, 0), devP2 = playerDevice(session.settings, 1);
                 for (int d = 1; d < 5; d++) {
                     const uint16_t bot = (d == devP2 && devP2 != devP1) ? bot2 : bot1;

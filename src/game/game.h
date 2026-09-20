@@ -62,6 +62,16 @@ public:
     // the same animal twice without the app having to say anything.
     void setCharacter(int player, const std::string &characterId);
 
+    // O24: Progression can be played until it is beaten. A death there ends the level for EVERYBODY and the level
+    // STARTS AGAIN FROM THE BEGINNING, because the user's rule is that both players have to get through it:
+    // "jak 1 gracz zginie to i drugi ginie i obaj sie resetuja na starcie - musza obaj przejsc". With this on
+    // that restart happens by itself, over and over, and the level ends only by being crossed or left through the
+    // pause menu; off (the default), it is a game over and the player chooses.
+    void setInfiniteRespawn(bool on) { infiniteRespawn_ = on; }
+    bool infiniteRespawn() const { return infiniteRespawn_; }
+    // steps left before the level starts again; 0 when no restart is pending (the app may count it down on screen)
+    int levelRetrySteps() const { return levelRetrySteps_; }
+
     // O23 TWO PLAYERS. 1 or 2; setting it rebuilds the scene (the starting columns and the rows differ), so call it
     // from the home screen exactly like setLevel().
     void setPlayerCount(int count);
@@ -130,13 +140,23 @@ private:
     void updateScore(int player);
     void checkIfUserHasFallenOutOfFrame(int player);
     // O23: this player is out of the game - killed by the gap of a duel, or drowned, or run over. The game itself
-    // ends only when no player is left; Progression 2P puts a dead player back on the partner's head instead.
+    // ends only when no player is left; in Progression one death ends the level for everybody.
     void killPlayer(int player, const char *particle, real direction);
     void endForPlayer(int player);
     void outOfFrame(int player);
     // O23 Progression 2P: the leader is pulled back onto the other player's head instead of leaving it behind
     void pullBack(int front, int back);
-    void reviveOnPartner(int player, int partner);
+    // O24: put `player` on `partner`'s head as a little hop rather than by moving it there - the arc, the squash
+    // and the timing of a hop of its own, because appearing up there out of nowhere is what was reported
+    void hopOntoHead(int player, int partner);
+    // how long that arc lasts, in steps (two halves of baseAnimationTime at 60 Hz, rounded up)
+    static const int kCarryHopSteps = 20;
+    // O24 Progression: one death ends the level for everybody - both have to get through it
+    void endLevelForEveryone();
+    // O24: ...and with endless retries on, the whole level then starts again from the beginning, both players at
+    // the starting row. Deferred to the top of the next step(): it rebuilds the scene and the map, which must not
+    // happen underneath the step that is walking them.
+    void restartLevelNow();
     // O23: the upper player was left standing in mid-air when the lower one hopped away - it comes down onto
     // whatever its own tile turns out to be (grass, a log, or the water that then drowns it)
     void landAfterCarry(int player);
@@ -146,7 +166,7 @@ private:
     // return at once with one player.
     void updateCarrying();
     void updateGap();
-    void updateRespawn();
+    void updateLevelRetry();
     // is THIS player out of the game? With one player it is exactly isGameEnded().
     bool playerBlocked(int player) const;
     void rumble();
@@ -173,6 +193,9 @@ private:
     std::unique_ptr<GameMap> map_;
     Player heroes_[2];
     int playerCount_ = 1;
+    bool infiniteRespawn_ = false;
+    int levelRetrySteps_ = 0;          // counting down to the level starting again (endless retries)
+    bool pendingLevelRestart_ = false; // ...carried out at the top of the next step()
     ParticleSystem feathers_, water_;
     Vec3 cameraPosition_{-1, 2.8, -2.9};
     real camCount_ = 0;
