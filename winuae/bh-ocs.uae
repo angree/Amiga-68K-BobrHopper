@@ -1,0 +1,74 @@
+; THE OCS TEST MACHINE: the same plain 68020 without FPU as bh-020.uae, JIT off and throttled -80%, but with the
+; ORIGINAL chipset instead of AGA - which is the whole point. Extra Half-Brite is an OCS/ECS mode: six bitplanes,
+; 64 pens, of which the upper 32 are fixed at half the lower 32 by the hardware. A machine with AGA can show it
+; too, so testing EHB on an AGA config proves nothing about the machines this mode exists for.
+;
+; NO RTG BOARD HERE, on purpose: on an AGA config a mistake in the OCS path can fall through to something that
+; still looks right. This machine has one way to draw and no way to hide.
+;
+; 512 KB of chip RAM, which is what an OCS Agnus can ADDRESS. This is not a size preference: give the machine
+; more and AllocMem(MEMF_CHIP) hands out addresses above 512 KB that the display DMA cannot reach, so the CPU
+; writes the bitplanes perfectly and the screen shows black - intermittently, depending on where the allocation
+; happened to land. That cost an afternoon of looking for a bug in the EHB path that was not there: the game's
+; own frame dumps were correct throughout, which is what finally pointed away from the drawing and at the RAM.
+config_description=Bobr Hopper - OCS chipset (Extra Half-Brite) on a plain 68020, no FPU
+; --- CPU: PLAIN 68020, NO FPU. This is the architecture the port targets.
+;     The game will want a faster CPU than this in practice, but every decision
+;     (16.16 fixed point, sprites instead of polygons) is made for THIS. ---
+cpu_type=68020
+cpu_model=68020
+fpu_model=0
+cpu_compatible=false
+cpu_24bit_addressing=false
+cpu_speed=max
+cpu_throttle=-800.0
+cachesize=0
+; --- Chipset: A4000 AGA ---
+chipset=ocs
+chipset_compatible=
+chipmem_size=1
+; FAST RAM IS NOT OPTIONAL. The sprite container alone is 1.2-1.6 MB and the sound bank another 0.6, so with
+; nothing but the 2 MB of chip the game runs out during start-up and the CLI says "Program aborted" - which is
+; what this machine did until it was given fast RAM, and it looked exactly like a bug in the OCS path.
+;
+; Both banks are here because Zorro II ALONE did not come up in this emulator configuration (same abort), and
+; neither did the 24-bit A500-compatible variant, which would not boot the game at all. Those are facts about
+; this .uae file and not about the game: what the game needs is a 68020 and a few megabytes of fast RAM, and
+; whether a particular accelerator provides them as Zorro II or Zorro III is nothing it can tell apart.
+fastmem_size=8
+z3mem_size=32
+; --- Kickstart 3.1 (A4000, 40.70) ---
+kickstart_rom_file=C:\temp\amiga_bobr\ROM3.1_A4000.40.70.ROM
+; --- Boot: plain AGA Workbench 3.1, mounted READ-ONLY. The game writes only to
+;     PROGDIR: (Work:), so this is enforced rather than trusted. ---
+hardfile2=ro,DH0:C:\temp\amiga_bobr\boot.hdf,32,1,2,512,0,,uae
+; --- WORK: the shared folder. Binaries, data and logs are swapped here from the
+;     host without ever touching the HDF image. ---
+filesystem2=rw,WORK:Work:C:\temp\amiga_bobr\work,-128
+; --- NO RTG board: this machine can only do what the chipset can do. ---
+; --- Display: Direct3D (gfx_api=1).
+;     It was DirectDraw, on the theory that PrintWindow capture needs it. Measured: with DirectDraw the window
+;     photographs BLACK through PrintWindow *and* through a desktop copy, three times running, while the game
+;     underneath is plainly alive (WinUAE's own status bar shows 50 fps and 100% CPU). So DirectDraw bought
+;     nothing and cost the only way to see what Intuition draws OUTSIDE our chunky buffer - the screen bar and
+;     the border. The game's own frame dump remains the primary evidence either way. ---
+gfx_api=1
+gfx_width_windowed=800
+gfx_height_windowed=600
+gfx_fullscreen_amiga=false
+win32.posx=140
+win32.posy=90
+; --- Mouse: magic mouse ON, so the host pointer is NOT captured and stays usable
+;     outside the emulator window. ---
+magic_mouse=true
+magic_mousecursor=1
+input.mouse_speed=100
+; --- Boot straight into emulation ---
+use_gui=no
+show_leds=true
+sound_output=normal
+sound_channels=stereo
+sound_frequency=44100
+sound_interpol=none
+sound_filter=emulated
+sound_stereo_separation=10

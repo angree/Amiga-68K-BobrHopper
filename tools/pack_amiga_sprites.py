@@ -117,15 +117,165 @@ def sprite_symbol(e):
     return base + ("_S%d" % e["phase"] if e["phase"] >= 0 else "")
 
 
-def nearest(color, palette):
-    best, bestd = ART_FIRST, None
+def _lum(c):
+    """Rec.601 luminance, the one the eye agrees with best for "is this the light face or the dark one"."""
+    return (c[0] * 299 + c[1] * 587 + c[2] * 114) / 1000.0
+
+
+def nearest(color, palette, first=None):
+    if first is None:
+        first = ART_FIRST
+    best, bestd = first, None
     for i, p in enumerate(palette):
-        if i < ART_FIRST:
+        if i < first:
             continue  # never map art onto the transparent key, the menus' colours or the system's registers
         d = (color[0] - p[0]) ** 2 + (color[1] - p[1]) ** 2 + (color[2] - p[2]) ** 2
         if bestd is None or d < bestd:
             best, bestd = i, d
     return best
+
+
+# ---------------------------------------------------------------------------- OCS / Extra Half-Brite
+#
+# SIX bitplanes on a chipset that has no more: 64 pens, of which only the first 32 are ours to choose. Pen 32 + n
+# always shows half of pen n, and the halving is the CHIPSET's, done on the four bits it actually stores - so the
+# palette is computed in nibbles here and written out as nibble * 17. Computing it in eight bits and rounding at
+# the end puts the halves in the wrong place: half of 0x8F is 0x47, but half of the nibble 8 is 4, which shows as
+# 0x44.
+#
+# WHAT IS PINNED, AND WHY IT SURVIVES THE OPTIMISER. The mouse pointer is hardware sprite 0 and reads registers
+# 17, 18 and 19 whatever we do; the screen bar's pens are 10..12 (src/amiga/amiga_gfx.c, g_screen_pens); the menus
+# and the sky have their own fixed indices so the Amiga shows the console versions' colours. Those COLOURS are
+# pinned. The art is free to draw WITH them - that is the difference from the 256-colour sets, where art was kept
+# out of the reserved indices as a tidiness rule that cost two entries out of 256 and would cost twenty out of 64.
+# Pinning the colour is what protects the pointer and the bar; forbidding the art to reference it protects nothing.
+EHB_FREE_SLOTS = [14, 15] + list(range(20, 32))  # 14, 15: greys nothing draws with (see SYS_SLOTS)
+
+# THREE COLOURS THE OPTIMISER IS NOT ALLOWED TO AVERAGE AWAY. A fit that minimises total error over 500,000
+# pixels will happily spend nothing on a colour that covers a few thousand of them, and it did:
+#
+#   - the lily pads are 96% three greens (18A652, 088E42, 108A42) and every one of them landed on 116677, a
+#     dark teal, because no green was worth a pen on its own. The pads came out sea-coloured;
+#   - the beaver's brown (633C21) and the log's (734131) are close enough that the fit merged them into one
+#     pen, so the animal was exactly the colour of the thing it stands on and vanished into it.
+#
+# Both are the author's own reports. A pinned colour costs one of the fourteen free base pens and buys its
+# half-bright as well, which for the green is the darker shade the pads already use.
+ART_PINS = [
+    ("lily green", (0x11, 0x99, 0x44)),
+    ("beaver brown", (0x66, 0x44, 0x22)),
+    # TWO tones for the logs, and both deliberately LIGHTER than the beaver. In the artwork a log is 734131 and
+    # the beaver 633C21 - the same brown to within a nibble - so no amount of "pick the nearest pen that is not
+    # the beaver's" separates them; the log has to be moved on purpose. Light wood under a dark animal is also
+    # the right way round: the beaver stands ON the log, so the log is the background and gives way.
+    ("log light", (0xBB, 0x99, 0x77)),
+    ("log dark", (0x88, 0x66, 0x55)),
+]
+
+# THE LOGS ARE DRAWN IN THOSE TWO PENS AND NOTHING ELSE. Banning the beaver's pen was not enough - the search
+# just moved the log to 665522, one nibble of green away from it. Banning a whole radius was not enough either:
+# what was left that was nearest to a dark brown was 777722, an olive, and the pinned wood tone still lost by a
+# handful of squared units. A whitelist says what the log IS instead of what it may not be, and two tones is
+# what a flat-shaded log needs: a lit face and a shaded one.
+LOG_PINS = (2, 3)  # indices into ART_PINS
+LOG_PREFIX = "log_"
+
+
+def _nib(c):
+    """RGB8 -> the nibbles an OCS colour register holds. int(), because the Lloyd step hands this averages."""
+    return tuple(max(0, min(15, int((v + 8.5) // 17))) for v in c)
+
+
+def _rgb(n):
+    """nibbles -> the RGB8 those registers display."""
+    return tuple(v * 17 for v in n)
+
+
+def _half(n):
+    """what the chipset shows for pen 32 + n."""
+    return tuple(v >> 1 for v in n)
+
+
+def _sqd(a, b):
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
+
+
+def build_ehb_palette(counts, reserved, rounds=24):
+    """64 EHB pens: the reserved colours where they must be, the rest chosen to fit the art.
+
+    `reserved` is the fixed part of the base half, index -> RGB8. Returns (64 RGB8 entries, pin index map).
+    """
+    base = [None] * 32
+    for i, rgb in reserved.items():
+        base[i] = _nib(rgb)
+    free = [i for i in range(32) if base[i] is None]
+    assert free == EHB_FREE_SLOTS, (free, EHB_FREE_SLOTS)
+
+    # The pinned art colours take the first free slots and stay there; the fit moves only what is left.
+    pin_index = {}
+    for n, (name, rgb) in enumerate(ART_PINS):
+        base[free[n]] = _nib(rgb)
+        pin_index[name] = free[n]
+    free = free[len(ART_PINS):]
+
+    art = [(c, n) for c, n in counts.items() if n > 0]
+    art.sort(key=lambda cn: -cn[1])
+
+    def pens():
+        out = []
+        for i in range(32):
+            out.append(_rgb(base[i]) if base[i] else None)
+        for i in range(32):
+            out.append(_rgb(_half(base[i])) if base[i] else None)
+        return out
+
+    # Start where the art is densest, in the colours the reserved pens and their halves leave worst covered.
+    fixed = [_rgb(b) for b in base if b] + [_rgb(_half(b)) for b in base if b]
+    for slot in free:
+        worst, worstd = None, -1
+        have = fixed + [_rgb(base[i]) for i in free if base[i]] + [_rgb(_half(base[i])) for i in free if base[i]]
+        for c, n in art[:400]:
+            d = min(_sqd(c, h) for h in have) * n
+            if d > worstd:
+                worstd, worst = d, c
+        base[slot] = _nib(worst)
+
+    # Lloyd, with the half-brights pulling on their own base. A base serves two pens: pixels that landed on
+    # `b` want b where they are, pixels that landed on `b >> 1` want b at twice where they are, and the second
+    # group pulls a quarter as hard because moving b by d moves its half by d/2.
+    for _ in range(rounds):
+        acc = {i: [0.0, 0.0, 0.0, 0.0] for i in free}  # r, g, b, weight
+        for c, n in art:
+            p = pens()
+            bi, bd = None, None
+            for i, rgb in enumerate(p):
+                if rgb is None:
+                    continue
+                d = _sqd(c, rgb)
+                if bd is None or d < bd:
+                    bd, bi = d, i
+            slot = bi & 31
+            if slot not in acc:
+                continue
+            a = acc[slot]
+            if bi < 32:
+                a[0] += c[0] * n; a[1] += c[1] * n; a[2] += c[2] * n; a[3] += n
+            else:
+                a[0] += c[0] * n * 0.5; a[1] += c[1] * n * 0.5; a[2] += c[2] * n * 0.5; a[3] += n * 0.25
+        moved = 0
+        for slot in free:
+            a = acc[slot]
+            if a[3] <= 0:
+                continue
+            want = _nib((a[0] / a[3], a[1] / a[3], a[2] / a[3]))
+            if want != base[slot]:
+                base[slot] = want
+                moved += 1
+        if not moved:
+            break
+
+    out = [_rgb(b) for b in base] + [_rgb(_half(b)) for b in base]
+    return out, pin_index
 
 
 FLOOR_NAMES = ("grass_0", "grass_1", "road_0", "road_1", "river", "railroad")
@@ -173,6 +323,8 @@ def main():
     # 320x240 one - the game has one compiled name table, so both sets must list the same sprites in the same order.
     ap.add_argument("--name", default="sprites.spr")
     ap.add_argument("--seal", type=int, default=1)
+    ap.add_argument("--ehb", action="store_true",
+                    help="OCS Extra Half-Brite: 64 pens, the upper 32 fixed at half the lower 32 (lores only)")
     args = ap.parse_args()
 
     entries = load_index(os.path.join(args.indir, "sprites.txt"))
@@ -181,6 +333,7 @@ def main():
 
     # Pass 1: every opaque colour in every sprite, by how many pixels use it.
     images, counts = [], Counter()
+    log_counts = Counter()  # the logs' own, so their two tones can be split where their own shading splits
     for e in entries:
         path = sprite_file(args.indir, e)
         img = Image.open(path).convert("RGBA")
@@ -195,6 +348,8 @@ def main():
                 r, g, b, a = px[x, y]
                 if a >= 128:
                     counts[(r, g, b)] += 1
+                    if e["name"].startswith(LOG_PREFIX):
+                        log_counts[(r, g, b)] += 1
 
     # Index 0 is the transparent key and is never drawn. Index 1 is the SKY: the game clears the screen to it
     # before anything else, and no sprite contains it (sprites are cropped to the model), so it would otherwise be
@@ -204,33 +359,71 @@ def main():
     # first thing the user said about the running game. Nothing is ever drawn in index 0, so its colour is free
     # to be anything; black is what a border should be.
     sys_cols = [rgb for _, rgb in SYS_SLOTS]
-    # 0 transparent, 1 sky, 2..9 the menus' colours, 10..19 the system's (bar pens and the mouse pointer's
-    # hardware registers). Art starts at ART_FIRST and may never land below it.
-    #
-    # The art keeps its OWN copies of white and black even though the reserved slots hold those colours too.
-    # Excluding them looked tidier and was wrong: with no art slot of their own, every white pixel in the
-    # artwork mapped onto the reserved white - which is register 17, the mouse pointer's - and the reservation
-    # existed in name only. Two duplicated entries out of 256 buy a pointer and a title bar that the game can
-    # never repaint by accident.
-    ordered = [c for c, _ in counts.most_common() if c != SKY]
-    palette = [(0, 0, 0), SKY] + UI_COLOURS + sys_cols
-    merged = 0
-    room = MAX_COLORS - len(palette)
-    if len(ordered) <= room:
-        palette.extend(ordered)
+    if args.ehb:
+        # EHB decides its own 64 entries: everything pinned stays where the hardware and the menus need it, the
+        # fourteen slots nothing draws with are fitted to this set's own art, and 32..63 follow by halving.
+        reserved = {0: (0, 0, 0), 1: SKY}
+        for i, rgb in enumerate(UI_COLOURS):
+            reserved[UI_FIRST + i] = rgb
+        for i, (name, rgb) in enumerate(SYS_SLOTS):
+            if SYS_FIRST + i not in EHB_FREE_SLOTS:
+                reserved[SYS_FIRST + i] = rgb
+        palette, pin_index = build_ehb_palette(counts, reserved)
+        index_of = {}
+        log_index_of = {}
+        log_light = pin_index[ART_PINS[LOG_PINS[0]][0]]
+        log_dark = pin_index[ART_PINS[LOG_PINS[1]][0]]
+        # WHERE THE LOG'S OWN SHADING SPLITS, not where the palette happens to fall. Both pinned tones are
+        # lighter than every colour in the artwork, so a nearest-colour search gave the whole log one pen and
+        # the shading went flat. Splitting on the log's own luminance keeps the lit face and the shaded one -
+        # the midpoint of the range its pixels actually cover, weighted by how many there are.
+        log_lums = sorted(_lum(c) for c in log_counts)
+        log_split = (log_lums[0] + log_lums[-1]) / 2.0 if log_lums else 0.0
+        print("EHB palette: 64 pens, %d chosen for the art, %d pinned (%s), 32 half-brights"
+              % (len(EHB_FREE_SLOTS) - len(ART_PINS), len(ART_PINS),
+                 ", ".join("%s pen %d" % (n, pin_index[n]) for n, _ in ART_PINS)))
+        print("  logs: %d colours split at luminance %.0f into pen %d (lit) and pen %d (shaded)"
+              % (len(log_counts), log_split, log_light, log_dark))
+        err = wsum = 0
+        for c, n in counts.items():
+            err += min((c[0] - p[0]) ** 2 + (c[1] - p[1]) ** 2 + (c[2] - p[2]) ** 2 for p in palette) * n
+            wsum += n
+        print("  fit over %d painted pixels: rms %.1f per channel" % (wsum, (err / wsum / 3.0) ** 0.5))
     else:
-        palette.extend(ordered[:room])
-        merged = len(ordered) - room
-    # ONLY the art range: a sprite pixel must never be given a reserved index, even when its colour happens to
-    # match one exactly (white and black do).
-    index_of = {c: i for i, c in enumerate(palette) if i >= ART_FIRST}
+        # 0 transparent, 1 sky, 2..9 the menus' colours, 10..19 the system's (bar pens and the mouse pointer's
+        # hardware registers). Art starts at ART_FIRST and may never land below it.
+        #
+        # The art keeps its OWN copies of white and black even though the reserved slots hold those colours too.
+        # Excluding them looked tidier and was wrong: with no art slot of their own, every white pixel in the
+        # artwork mapped onto the reserved white - which is register 17, the mouse pointer's - and the reservation
+        # existed in name only. Two duplicated entries out of 256 buy a pointer and a title bar that the game can
+        # never repaint by accident.
+        ordered = [c for c, _ in counts.most_common() if c != SKY]
+        palette = [(0, 0, 0), SKY] + UI_COLOURS + sys_cols
+        merged = 0
+        room = MAX_COLORS - len(palette)
+        if len(ordered) <= room:
+            palette.extend(ordered)
+        else:
+            palette.extend(ordered[:room])
+            merged = len(ordered) - room
+        # ONLY the art range: a sprite pixel must never be given a reserved index, even when its colour happens to
+        # match one exactly (white and black do).
+        index_of = {c: i for i, c in enumerate(palette) if i >= ART_FIRST}
+        log_index_of = {}
+        log_light = log_dark = -1
+        log_split = 0.0
 
-    print("colours in the art: %d%s" % (len(ordered),
-          "" if not merged else "  (%d rarest merged into their nearest neighbour)" % merged))
+        print("colours in the art: %d%s" % (len(ordered),
+              "" if not merged else "  (%d rarest merged into their nearest neighbour)" % merged))
 
     # Pass 2: pixels.
     blobs = []
     for e, img in zip(entries, images):
+        # The logs are painted in their own two pens and nothing else, so no log pixel can come out the colour
+        # of the beaver standing on it. Only the logs: nothing else sits under the animal.
+        is_log = args.ehb and e["name"].startswith(LOG_PREFIX)
+        cache = log_index_of if is_log else index_of
         px = img.load()
         data = bytearray(e["w"] * e["h"])
         for y in range(e["h"]):
@@ -240,10 +433,16 @@ def main():
                 if a < 128:
                     continue  # stays 0 = transparent
                 key = (r, g, b)
-                i = index_of.get(key)
+                i = cache.get(key)
                 if i is None:
-                    i = nearest(key, palette)
-                    index_of[key] = i
+                    if is_log:
+                        i = log_light if _lum(key) >= log_split else log_dark
+                    else:
+                        # EHB: every pen is fair game, including the pinned ones - their COLOUR is what is
+                        # pinned, and drawing white with the pointer's register paints white, it does not
+                        # recolour the pointer. Index 0 stays out either way: it is the transparency key.
+                        i = nearest(key, palette, first=1 if args.ehb else ART_FIRST)
+                    cache[key] = i
                 data[row + x] = i
         blobs.append(bytes(data))
 
@@ -275,7 +474,11 @@ def main():
         f.write("// One constant per baked sprite, so the Amiga never looks a sprite up by name at runtime.\n")
         f.write("#ifndef BH_SPRITE_IDS_H\n#define BH_SPRITE_IDS_H\n\n")
         f.write("#define BH_SPRITE_COUNT %d\n" % len(entries))
-        f.write("#define BH_PALETTE_ENTRIES %d\n" % len(palette))
+        # The palette SIZE is deliberately not here. build/bake_amiga.sh proves every set lists the same sprites in
+        # the same order by comparing these headers byte for byte, and the EHB set has 64 entries where the
+        # 256-colour sets have about 170 - a difference that says nothing about the sprite table and would break
+        # the comparison that does matter. Nothing in the game ever read the define: the count comes from the .spr
+        # the game actually loaded, and the packer prints it (out/check/amiga/<set>/pack.log).
         f.write("// Palette index 0 is the transparent key and is never drawn; index 1 is the sky (0x87C6FF from\n")
         f.write("// src/game/settings.h), which appears in no sprite and must therefore be reserved on purpose.\n")
         f.write("#define BH_SKY_INDEX %d\n\n" % SKY_INDEX)

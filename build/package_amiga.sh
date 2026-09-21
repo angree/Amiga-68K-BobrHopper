@@ -80,6 +80,13 @@ for w in spriteswide.spr sprites640wide.spr; do
     [ -f "$REPO/data_amiga/$w" ] || { echo "no data_amiga/$w - run sh build/bake_amiga.sh"; exit 1; }
     cp "$REPO/data_amiga/$w" "$STAGE/data/"
 done
+# O25: and the OCS pair, for a machine with no AGA. Same pictures in 64 Extra Half-Brite pens instead of 256
+# colours, so they are the same SIZE as the lores sets they are made from - an OCS machine is not asked to find
+# any more memory than an AGA one, it just gets a palette its chipset can show.
+for w in spritesocs.spr spritesocswide.spr; do
+    [ -f "$REPO/data_amiga/$w" ] || { echo "no data_amiga/$w - run sh build/bake_amiga.sh ocs ocswide"; exit 1; }
+    cp "$REPO/data_amiga/$w" "$STAGE/data/"
+done
 [ -f "$REPO/data_amiga/sounds.bhs" ] && cp "$REPO/data_amiga/sounds.bhs" "$STAGE/data/"
 cp "$REPO/data_amiga/manifest.txt" "$STAGE/data/"
 cp "$REPO/data_amiga/meshes/"*.fmesh "$STAGE/data/meshes/"
@@ -95,9 +102,11 @@ One or TWO players on one screen.
 
 REQUIREMENTS
   - 68020 or better, no FPU needed (the whole game is 16.16 fixed point)
-  - AGA, or an RTG board (Picasso96 / CyberGraphX)
-  - Kickstart 3.0+, about 1 MB of chip RAM free (AGA) and 4 MB of fast RAM
-    (10 MB for the 640x480 RTG mode)
+  - AGA, an RTG board (Picasso96 / CyberGraphX), or PLAIN OCS/ECS - the OCS mode
+    draws in Extra Half-Brite, 64 colours, 320x240, with its own sprite set
+  - Kickstart 3.0+, a few hundred KB of chip RAM free and 4 MB of fast RAM
+    (10 MB for the 640x480 RTG mode). Fast RAM is not optional: the sprites and
+    the sounds are about 2 MB and they do not fit in chip.
   - a hard disk: the music is STREAMED from disk while you play
 
 INSTALL
@@ -105,10 +114,11 @@ INSTALL
   The game writes only inside its own drawer.
 
 SETTINGS BEFORE THE GAME STARTS - BobrHopperPrefs
-  Graphics     AGA or RTG
-  Resolution   320x240 (AGA and RTG) or 640x480 (RTG only)
+  Graphics     AGA, RTG, or OCS/ECS (Extra Half-Brite)
+  Resolution   320x240 (all three) or 640x480 (RTG only)
   Screen bar   the Workbench title bar above the game: on or off
   From a Shell: BobrHopperPrefs GFX=RTG SCREEN=640x480 BAR=OFF   (SHOW prints them)
+                BobrHopperPrefs GFX=OCS                          for a machine without AGA
   Everything else (sound, music, language, character, two players, ...) is in the
   game's own settings screen: press S on the title screen. The list scrolls - a
   small triangle appears when there is more above or below.

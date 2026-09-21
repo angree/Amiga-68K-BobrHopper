@@ -4,7 +4,6 @@
 #define BH_SPRITE_IDS_H
 
 #define BH_SPRITE_COUNT 371
-#define BH_PALETTE_ENTRIES 170
 // Palette index 0 is the transparent key and is never drawn; index 1 is the sky (0x87C6FF from
 // src/game/settings.h), which appears in no sprite and must therefore be reserved on purpose.
 #define BH_SKY_INDEX 1

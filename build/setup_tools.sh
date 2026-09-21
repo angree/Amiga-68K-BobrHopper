@@ -41,3 +41,13 @@ if [ ! -f \$T/lib/libSDL2.so ]; then
 fi
 echo 'wsl tools OK'
 "
+
+# WestonPack, the fallback runtime the R36S launcher falls back to when the native path fails. It is not ours to
+# redistribute and it is not downloaded here - drop weston_pkg_0.2.squashfs into $TOOLS yourself, or point
+# BOBRHOPPER_WESTON_PKG at wherever you keep it. tools/r36s_sync.ps1 looks in those two places and nowhere else:
+# it used to carry an absolute path into another of the author's projects, in a file that gets published.
+if [ -f "$TOOLS/weston_pkg_0.2.squashfs" ]; then
+    echo "weston_pkg_0.2.squashfs OK"
+else
+    echo "weston_pkg_0.2.squashfs MISSING from $TOOLS - the R36S card sync will skip the WestonPack fallback"
+fi

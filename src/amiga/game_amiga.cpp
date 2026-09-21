@@ -92,8 +92,11 @@ inline mreal viewScaleFor(int screenW) // 6 at 320 (the SF2000 framing), 3 at 64
 }
 // Which of the four containers a screen size and a framing need. The font does not change: the screens lay
 // themselves out in the same logical pixels either way.
-inline const char *spritePathFor(bool hires, bool wide)
+// O25: and a fifth and sixth for OCS. An EHB screen has 64 pens where AGA has 256, so its sprites carry their own
+// palette baked for those 64 - the same pictures, packed differently (build/bake_amiga.sh, tools/pack_amiga_sprites.py).
+inline const char *spritePathFor(bool hires, bool wide, bool ehb = false)
 {
+    if (ehb) return wide ? "PROGDIR:data/spritesocswide.spr" : "PROGDIR:data/spritesocs.spr";
     return hires ? (wide ? "PROGDIR:data/sprites640wide.spr" : "PROGDIR:data/sprites640.spr")
                  : (wide ? "PROGDIR:data/spriteswide.spr" : "PROGDIR:data/sprites.spr");
 }
@@ -603,8 +606,13 @@ private:
         for (int i = 0; i < colourCount_; i++)
             if (colourKey_[i] == key) return colourIndex_[i];
         long best = 0x7fffffffL;
-        int index = 20;
-        for (int i = 20; i < 256 && i < sprites_->paletteEntries; i++) { // below 20: transparent, sky, UI and system slots
+        // O25: on a 64-pen EHB set every pen but the transparency key is worth searching. Keeping the flat
+        // colours out of 1..19 there would throw away the sky, the greys and the menu blues - a fifth of the
+        // palette - to protect registers whose COLOUR is pinned anyway; painting with the pointer's register
+        // paints its colour, it does not recolour the pointer. The 256-colour sets keep the old line exactly.
+        const int firstPen = sprites_->paletteEntries <= 64 ? 1 : 20;
+        int index = firstPen;
+        for (int i = firstPen; i < 256 && i < sprites_->paletteEntries; i++) {
             const unsigned char *p = sprites_->palette + i * 3;
             const long dr = r - p[0], dg = g - p[1], db = b - p[2], d = dr * dr + dg * dg + db * db;
             if (d < best) {
@@ -1348,20 +1356,26 @@ struct DisplayPrefs {
     int backend = AMIGAGFX_BACKEND_AGA;
     int bar = 1;
     int hires = 0; // 640x480, RTG only
+    int ehb = 0;   // O25: OCS Extra Half-Brite - six bitplanes, its own 64-pen sprite set, 320x240 only
     DisplayPrefs()
     {
         BHPrefs p;
         const int found = bh_prefs_load(&p); // src/amiga/prefs_bh.c - the same parser BobrHopperPrefs uses
-        backend = p.rtg ? AMIGAGFX_BACKEND_RTG : AMIGAGFX_BACKEND_AGA;
+        backend = p.gfx == BH_GFX_RTG   ? AMIGAGFX_BACKEND_RTG
+                  : p.gfx == BH_GFX_OCS ? AMIGAGFX_BACKEND_EHB
+                                        : AMIGAGFX_BACKEND_AGA;
         bar = p.bar;
-        hires = p.hires && p.rtg;
+        hires = p.hires && p.gfx == BH_GFX_RTG;
+        ehb = p.gfx == BH_GFX_OCS;
         FILE *f = fopen("PROGDIR:rtg.txt", "r");
         if (f) {
             fclose(f);
             backend = AMIGAGFX_BACKEND_RTG;
+            ehb = 0;
         }
-        printf("prefs: gfx %s, screen bar %s (%s)\n", backend == AMIGAGFX_BACKEND_RTG ? "rtg" : "aga", bar ? "on" : "off",
-               found ? "from bobrhopper.prefs" : "no bobrhopper.prefs - defaults");
+        printf("prefs: gfx %s, screen bar %s (%s)\n",
+               backend == AMIGAGFX_BACKEND_RTG ? "rtg" : backend == AMIGAGFX_BACKEND_EHB ? "ocs (EHB)" : "aga",
+               bar ? "on" : "off", found ? "from bobrhopper.prefs" : "no bobrhopper.prefs - defaults");
     }
 };
 
@@ -1494,7 +1508,7 @@ int main(void)
     Session session;
     session.loadSettings();
     gWide = session.settings.players > 1 || session.settings.framing == 1;
-    const char *spritePath = spritePathFor(displayPrefs.hires != 0, gWide);
+    const char *spritePath = spritePathFor(displayPrefs.hires != 0, gWide, displayPrefs.ehb != 0);
     const char *const fontPath = displayPrefs.hires ? "PROGDIR:data/font640.bhf" : "PROGDIR:data/font.bhf";
     printf("sprites: %s (%s view, %d player%s)\n", spritePath, gWide ? "wide" : "normal", session.settings.players,
            session.settings.players > 1 ? "s" : "");
@@ -1504,7 +1518,7 @@ int main(void)
         // game starts in the normal view rather than refusing to run.
         printf("sprites: %s missing - falling back to the normal view\n", spritePath);
         gWide = false;
-        spritePath = spritePathFor(displayPrefs.hires != 0, false);
+        spritePath = spritePathFor(displayPrefs.hires != 0, false, displayPrefs.ehb != 0);
         if (!bh_sprites_load(&sprites, spritePath)) return 20;
     }
 
@@ -1538,7 +1552,15 @@ int main(void)
         bh_sprites_free(&sprites);
         return 20;
     }
-    amigagfx_set_palette(sprites.palette, 0, 256);
+    // O25: an EHB screen has THIRTY-TWO colour registers, not 64 and not 256. The other 32 pens are not registers
+    // at all - the chipset derives them by halving, which is the whole trick of the mode. The sprite set carries
+    // all 64 entries because the packer and the renderer both need to know what those halves show, but only the
+    // first 32 may be loaded: handing LoadRGB32 a count of 64 walks off the end of the screen's ColorMap, and the
+    // screen then came up BLACK - bar and all, which is what pointed at the ColorMap rather than at the drawing
+    // (the game's own frame dump was perfect throughout).
+    const int kPens = displayPrefs.ehb ? 32 : 256;
+    amigagfx_set_palette(sprites.palette, 0, kPens);
+    if (displayPrefs.ehb) amigagfx_set_ehb_palette(sprites.palette); // the image/fade path reduces through it
 
     BHSurface surface;
     surface.pixels = amigagfx_chunky();
@@ -1896,7 +1918,7 @@ int main(void)
             const bool wantWide = session.settings.players > 1 || session.settings.framing == 1;
             if (wantWide != gWide && game.state() == GameState::None && session.screens.menu() == Menu::None &&
                 !game.restarting()) {
-                const char *want = spritePathFor(displayPrefs.hires != 0, wantWide);
+                const char *want = spritePathFor(displayPrefs.hires != 0, wantWide, displayPrefs.ehb != 0);
                 bh_fill_rect(&surface, 0, 0, surface.width, surface.height, BH_SKY_INDEX);
                 if (font.faceCount > 0) {
                     const char *msg = "LOADING";
@@ -1910,7 +1932,8 @@ int main(void)
                     bh_sprites_free(&sprites);
                     sprites = next;
                     gWide = wantWide;
-                    amigagfx_set_palette(sprites.palette, 0, 256);
+                    amigagfx_set_palette(sprites.palette, 0, kPens);
+                    if (displayPrefs.ehb) amigagfx_set_ehb_palette(sprites.palette);
                     renderer.init(&sprites, models, surface.width, surface.height);
                     printf("sprites: swapped to %s\n", want);
                 } else {

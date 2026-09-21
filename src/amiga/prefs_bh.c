@@ -26,7 +26,7 @@ int bh_prefs_word_eq(const char *a, const char *b)
 
 void bh_prefs_defaults(BHPrefs *p)
 {
-    p->rtg = 0;
+    p->gfx = BH_GFX_AGA;
     p->bar = 1;
     p->hires = 0;
 }
@@ -58,7 +58,11 @@ int bh_prefs_load(BHPrefs *p)
         char *hash = strchr(line, '#');
         if (hash) *hash = 0;
         if (!next_word(&s, key, sizeof key) || !next_word(&s, word, sizeof word)) continue;
-        if (bh_prefs_word_eq(key, "gfx")) p->rtg = bh_prefs_word_eq(word, "rtg");
+        /* An unknown word means AGA - which is also what a file written before OCS existed meant. */
+        if (bh_prefs_word_eq(key, "gfx"))
+            p->gfx = bh_prefs_word_eq(word, "rtg")   ? BH_GFX_RTG
+                     : bh_prefs_word_eq(word, "ocs") ? BH_GFX_OCS
+                                                     : BH_GFX_AGA;
         else if (bh_prefs_word_eq(key, "bar")) p->bar = !bh_prefs_word_eq(word, "off");
         else if (bh_prefs_word_eq(key, "screen")) p->hires = bh_prefs_word_eq(word, "640x480");
     }
@@ -71,8 +75,9 @@ int bh_prefs_save(const BHPrefs *p)
     FILE *f = fopen(BH_PREFS_PATH, "w");
     if (!f) return 0;
     fprintf(f, "# Bobr Hopper settings - edit with BobrHopperPrefs or by hand\n");
-    fprintf(f, "gfx %s\n", p->rtg ? "rtg" : "aga");
-    fprintf(f, "screen %s\n", (p->hires && p->rtg) ? "640x480" : "320x240");
+    fprintf(f, "gfx %s\n", p->gfx == BH_GFX_RTG ? "rtg" : p->gfx == BH_GFX_OCS ? "ocs" : "aga");
+    /* 640x480 is an RTG size: neither AGA nor EHB has a sprite set baked for it. */
+    fprintf(f, "screen %s\n", (p->hires && p->gfx == BH_GFX_RTG) ? "640x480" : "320x240");
     fprintf(f, "bar %s\n", p->bar ? "on" : "off");
     fclose(f);
     return 1;

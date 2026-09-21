@@ -1463,7 +1463,15 @@ int amigagfx_open(int w, int h, int show_bar, int backend)
 	/* WFLG_ACTIVATE alone did not reliably give a backdrop window key focus -
 	 * keyboard events never arrived. Ask explicitly. */
 	ActivateWindow(g_window);
-	fprintf(stdout, "amiga: window open, IDCMP active - handing control to OpenTTD\n");
+	/* AND THE SCREEN IN FRONT. ActivateWindow activates a WINDOW; it says nothing about which SCREEN the display
+	 * shows, and a new screen is only in front until something else asks for the front. The game is started from
+	 * a CLI on the Workbench screen and prints to it, so a log line could pull Workbench forward and leave the
+	 * game running unseen behind it - which is exactly what happened: the picture came and went between runs of
+	 * the same binary on the same machine, while the game's own frame dumps were perfect every single time.
+	 * Nothing in this file ever asked for the screen, on any backend; it worked until now only because
+	 * OpenScreen leaves a new screen in front and nothing had disturbed it. */
+	ScreenToFront(g_screen);
+	fprintf(stdout, "amiga: window open, IDCMP active, screen in front\n");
 	return 0;
 }
 
@@ -1545,6 +1553,25 @@ int amigagfx_dump_screen(const char *path, const char *palpath)
 		pal[i * 3 + 0] = (UBYTE)(rgb[0] >> 24);
 		pal[i * 3 + 1] = (UBYTE)(rgb[1] >> 24);
 		pal[i * 3 + 2] = (UBYTE)(rgb[2] >> 24);
+	}
+	/* AN EHB SCREEN HAS 32 REGISTERS, and pens 32..63 are not registers at all - the chipset makes them by
+	 * halving. The ColorMap above therefore says nothing useful about them, and what it did say was stale
+	 * rubbish left from whatever had the screen before: a dump read back through it painted the roads PURPLE
+	 * while the game was drawing them grey, and for a while that looked like a bug in the palette. A dump is
+	 * evidence, so it has to record what the display SHOWS. The halving is on the four bits a register holds,
+	 * which is what the chipset does - not on the eight this table carries. */
+	if (g_backend == AMIGAGFX_BACKEND_EHB) {
+		for (i = 0; i < 32; i++) {
+			int c;
+			for (c = 0; c < 3; c++) {
+				int nib = (pal[i * 3 + c] + 8) / 17;
+				if (nib > 15) nib = 15;
+				pal[(32 + i) * 3 + c] = (UBYTE)((nib >> 1) * 17);
+			}
+		}
+		for (i = 64; i < 256; i++) {
+			pal[i * 3 + 0] = pal[i * 3 + 1] = pal[i * 3 + 2] = 0;
+		}
 	}
 
 	buf = (UBYTE *)AllocVec((ULONG)w * (ULONG)h, MEMF_ANY);

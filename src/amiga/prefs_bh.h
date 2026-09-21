@@ -8,10 +8,15 @@ extern "C" {
 
 #define BH_PREFS_PATH "PROGDIR:bobrhopper.prefs"
 
+/* Which screen the game opens. The cycle gadget's order, so BH_GFX_* IS the gadget index. */
+#define BH_GFX_AGA 0
+#define BH_GFX_RTG 1
+#define BH_GFX_OCS 2 /* Extra Half-Brite: six bitplanes, 320x240 only - what a machine without AGA can show */
+
 typedef struct {
-    int rtg; /* 0 AGA, 1 RTG */
+    int gfx; /* BH_GFX_AGA | BH_GFX_RTG | BH_GFX_OCS  (was a plain rtg flag until OCS made it three ways) */
     int bar; /* 1 the Intuition screen bar is shown, 0 hidden */
-    int hires; /* 1 = 640x480 - RTG only; the game ignores it on AGA */
+    int hires; /* 1 = 640x480 - RTG only; the game ignores it on AGA and OCS */
 } BHPrefs;
 
 void bh_prefs_defaults(BHPrefs *p);

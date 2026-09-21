@@ -42,7 +42,9 @@ enum { GID_GFX = 1, GID_SCREEN, GID_BAR, GID_SAVE, GID_CANCEL };
 
 typedef BHPrefs Prefs;
 
-static STRPTR kGfxLabels[] = {(STRPTR) "AGA (chipset)", (STRPTR) "RTG (graphics card)", NULL};
+/* The order IS BH_GFX_AGA, BH_GFX_RTG, BH_GFX_OCS - the cycle gadget hands back its index. */
+static STRPTR kGfxLabels[] = {(STRPTR) "AGA (chipset)", (STRPTR) "RTG (graphics card)",
+                              (STRPTR) "OCS/ECS (EHB, 64 colours)", NULL};
 static STRPTR kScreenLabels[] = {(STRPTR) "320x240", (STRPTR) "640x480 (RTG only)", NULL};
 static STRPTR kBarLabels[] = {(STRPTR) "Off", (STRPTR) "On", NULL};
 
@@ -52,8 +54,9 @@ static int prefs_save(const Prefs *p) { return bh_prefs_save(p); }
 
 static void prefs_show(const Prefs *p)
 {
-    printf("gfx    %s\nscreen %s\nbar    %s\n", (p->rtg ? "rtg" : "aga"), (p->rtg && p->hires) ? "640x480" : "320x240",
-           p->bar ? "on" : "off");
+    printf("gfx    %s\nscreen %s\nbar    %s\n",
+           (p->gfx == BH_GFX_RTG ? "rtg" : p->gfx == BH_GFX_OCS ? "ocs" : "aga"),
+           (p->gfx == BH_GFX_RTG && p->hires) ? "640x480" : "320x240", p->bar ? "on" : "off");
 }
 
 static int text_w(struct Screen *scr, const char *s) { return (int)TextLength(&scr->RastPort, (STRPTR)s, strlen(s)); }
@@ -86,8 +89,23 @@ static int edit(Prefs *p)
     gap = fh / 2;
     if (gap < 4) gap = 4;
     labw = text_w(scr, "Resolution:") + cw;
-    gadw = text_w(scr, "640x480 (RTG only)") + cw * 2 + 24;
-    if (text_w(scr, "RTG (graphics card)") + cw * 2 + 24 > gadw) gadw = text_w(scr, "RTG (graphics card)") + cw * 2 + 24; /* the longest label plus the cycle arrow box */
+    /* WIDE ENOUGH FOR THE LONGEST LABEL IN ANY OF THE CYCLE GADGETS, measured rather than listed. Two of the
+     * three label sets used to be named here by hand, and when OCS/ECS was added as a third graphics choice its
+     * label was longer than both and ran off the end of the gadget - the author sent a picture of it. A loop
+     * over the arrays themselves cannot fall behind them again. */
+    gadw = 0;
+    {
+        STRPTR *sets[3];
+        int si, li;
+        sets[0] = kGfxLabels;
+        sets[1] = kScreenLabels;
+        sets[2] = kBarLabels;
+        for (si = 0; si < 3; si++)
+            for (li = 0; sets[si][li] != NULL; li++) {
+                int need = text_w(scr, (const char *)sets[si][li]) + cw * 2 + 24; /* label plus the arrow box */
+                if (need > gadw) gadw = need;
+            }
+    }
     innerw = lm + labw + gadw + lm;
     if (lm + text_w(scr, kKeys) + lm > innerw) innerw = lm + text_w(scr, kKeys) + lm;
     leftb = scr->WBorLeft;
@@ -110,16 +128,17 @@ static int edit(Prefs *p)
     ng.ng_TopEdge = topb + y;
     ng.ng_GadgetText = (STRPTR) "_Graphics:";
     ng.ng_GadgetID = GID_GFX;
-    gad = g_gfx = CreateGadget(CYCLE_KIND, glist, &ng, GTCY_Labels, (ULONG)kGfxLabels, GTCY_Active, (ULONG)p->rtg,
+    gad = g_gfx = CreateGadget(CYCLE_KIND, glist, &ng, GTCY_Labels, (ULONG)kGfxLabels, GTCY_Active, (ULONG)p->gfx,
                                GT_Underscore, (ULONG)'_', TAG_END);
     y += gh + gap;
 
     ng.ng_TopEdge = topb + y;
     ng.ng_GadgetText = (STRPTR) "_Resolution:";
     ng.ng_GadgetID = GID_SCREEN;
-    /* 640x480 exists for RTG only (its sprite set is baked for it); on AGA the gadget is locked at 320x240 */
+    /* 640x480 exists for RTG only (its sprite set is baked for it); AGA and EHB are locked at 320x240 */
     gad = g_screen = CreateGadget(CYCLE_KIND, gad, &ng, GTCY_Labels, (ULONG)kScreenLabels, GTCY_Active,
-                                  (ULONG)(p->rtg ? p->hires : 0), GA_Disabled, (ULONG)(p->rtg ? FALSE : TRUE),
+                                  (ULONG)(p->gfx == BH_GFX_RTG ? p->hires : 0),
+                                  GA_Disabled, (ULONG)(p->gfx == BH_GFX_RTG ? FALSE : TRUE),
                                   GT_Underscore, (ULONG)'_', TAG_END);
     y += gh + gap;
 
@@ -193,10 +212,11 @@ static int edit(Prefs *p)
             case IDCMP_GADGETUP:
                 switch (src->GadgetID) {
                 case GID_GFX:
-                    p->rtg = (int)code;
-                    /* AGA has one resolution: lock the gadget there, and unlock it again for RTG */
-                    GT_SetGadgetAttrs(g_screen, win, NULL, GA_Disabled, (ULONG)(p->rtg ? FALSE : TRUE), GTCY_Active,
-                                      (ULONG)(p->rtg ? p->hires : 0), TAG_END);
+                    p->gfx = (int)code;
+                    /* only RTG has a second resolution: lock the gadget for AGA and EHB */
+                    GT_SetGadgetAttrs(g_screen, win, NULL, GA_Disabled,
+                                      (ULONG)(p->gfx == BH_GFX_RTG ? FALSE : TRUE), GTCY_Active,
+                                      (ULONG)(p->gfx == BH_GFX_RTG ? p->hires : 0), TAG_END);
                     break;
                 case GID_SCREEN: p->hires = (int)code; break;
                 case GID_BAR: p->bar = (int)code; break;
@@ -208,13 +228,14 @@ static int edit(Prefs *p)
             case IDCMP_VANILLAKEY:
                 switch (code) {
                 case 'g': case 'G':
-                    p->rtg = 1 - p->rtg;
-                    GT_SetGadgetAttrs(g_gfx, win, NULL, GTCY_Active, (ULONG)p->rtg, TAG_END);
-                    GT_SetGadgetAttrs(g_screen, win, NULL, GA_Disabled, (ULONG)(p->rtg ? FALSE : TRUE), GTCY_Active,
-                                      (ULONG)(p->rtg ? p->hires : 0), TAG_END);
+                    p->gfx = (p->gfx + 1) % 3; /* AGA -> RTG -> OCS -> AGA */
+                    GT_SetGadgetAttrs(g_gfx, win, NULL, GTCY_Active, (ULONG)p->gfx, TAG_END);
+                    GT_SetGadgetAttrs(g_screen, win, NULL, GA_Disabled,
+                                      (ULONG)(p->gfx == BH_GFX_RTG ? FALSE : TRUE), GTCY_Active,
+                                      (ULONG)(p->gfx == BH_GFX_RTG ? p->hires : 0), TAG_END);
                     break;
                 case 'r': case 'R':
-                    if (p->rtg) {
+                    if (p->gfx == BH_GFX_RTG) {
                         p->hires = 1 - p->hires;
                         GT_SetGadgetAttrs(g_screen, win, NULL, GTCY_Active, (ULONG)p->hires, TAG_END);
                     }
@@ -252,10 +273,12 @@ int main(int argc, char **argv)
             prefs_show(&p);
             return 0;
         } else if (word_eq(a, "?")) {
-            printf("BobrHopperPrefs [SHOW] [GFX=AGA|RTG] [SCREEN=320x240|640x480] [BAR=ON|OFF]\n");
+            printf("BobrHopperPrefs [SHOW] [GFX=AGA|RTG|OCS] [SCREEN=320x240|640x480] [BAR=ON|OFF]\n");
             return 0;
-        } else if (word_eq(a, "GFX=AGA")) { p.rtg = 0; changed = 1; }
-        else if (word_eq(a, "GFX=RTG")) { p.rtg = 1; changed = 1; }
+        } else if (word_eq(a, "GFX=AGA")) { p.gfx = BH_GFX_AGA; changed = 1; }
+        else if (word_eq(a, "GFX=RTG")) { p.gfx = BH_GFX_RTG; changed = 1; }
+        else if (word_eq(a, "GFX=OCS")) { p.gfx = BH_GFX_OCS; changed = 1; }
+        else if (word_eq(a, "GFX=EHB")) { p.gfx = BH_GFX_OCS; changed = 1; }
         else if (word_eq(a, "BAR=ON")) { p.bar = 1; changed = 1; }
         else if (word_eq(a, "SCREEN=320X240")) { p.hires = 0; changed = 1; }
         else if (word_eq(a, "SCREEN=640X480")) { p.hires = 1; changed = 1; }
