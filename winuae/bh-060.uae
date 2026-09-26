@@ -1,3 +1,12 @@
+; boot060.hdf = boot.hdf with MMULib (Aminet util/libs/MMULib.lha): 68060.library, 680x0.library, mmu.library in LIBS:
+; and SetPatch 40.16 patched to 40.17 so it loads them - which needs the MMU emulated (mmu_model). Made by
+; winuae/bh-prep060.uae; the AMOS Pro help and GadToolsBox were deleted from the copy to make room.
+; THE 68060 CHECK MACHINE: bh-020.uae with a 68060 and NO 68060.library on the boot disk. With its FPU: the boot
+; disk runs an FPU instruction at startup, and on an LC without the library that alone is a Line-F Guru before the
+; game ever starts. The integer instructions this machine exists for are missing either way.
+; Without the library every instruction the 060 lacks in silicon (64-bit MULU.L/MULS.L, DIVU.L/DIVS.L) ends in a
+; Guru instead of being emulated - so bobrhopper060 running here is proof that it has none on its way through a
+; game. Not a speed reference: frame rates are measured on bh-020.uae.
 ; THE TEST MACHINE: a PLAIN 68020 without FPU, JIT OFF, throttled -80% - which the user set as the stand-in for an
 ; 040's speed with an 020's instruction set ("020 no jit i -80% zeby zasymulowac predkosc 040 ale kompatybilnosc 020
 ; bez fpu"). The previous file said 68040, which I chose on my own: it would have let 040-only code through.
@@ -26,9 +35,10 @@ config_description=Bobr Hopper - PURE AGA on a PLAIN 68020, no FPU (the target m
 ; --- CPU: PLAIN 68020, NO FPU. This is the architecture the port targets.
 ;     The game will want a faster CPU than this in practice, but every decision
 ;     (16.16 fixed point, sprites instead of polygons) is made for THIS. ---
-cpu_type=68020
-cpu_model=68020
-fpu_model=0
+cpu_type=68060
+cpu_model=68060
+fpu_model=68060
+mmu_model=68060
 cpu_compatible=false
 cpu_24bit_addressing=false
 cpu_speed=max
@@ -44,7 +54,7 @@ z3mem_size=32
 kickstart_rom_file=C:\temp\amiga_bobr\ROM3.1_A4000.40.70.ROM
 ; --- Boot: plain AGA Workbench 3.1, mounted READ-ONLY. The game writes only to
 ;     PROGDIR: (Work:), so this is enforced rather than trusted. ---
-hardfile2=ro,DH0:C:\temp\amiga_bobr\boot.hdf,32,1,2,512,0,,uae
+hardfile2=ro,DH0:C:\temp\amiga_bobr\boot060.hdf,32,1,2,512,0,,uae
 ; --- WORK: the shared folder. Binaries, data and logs are swapped here from the
 ;     host without ever touching the HDF image. ---
 filesystem2=rw,WORK:Work:C:\temp\amiga_bobr\work,-128

@@ -1,3 +1,4 @@
+; ONE-OFF: bh-020 booting a WRITABLE copy of the disk (boot060.hdf), to install 68060.library on it (MMULib).
 ; THE TEST MACHINE: a PLAIN 68020 without FPU, JIT OFF, throttled -80% - which the user set as the stand-in for an
 ; 040's speed with an 020's instruction set ("020 no jit i -80% zeby zasymulowac predkosc 040 ale kompatybilnosc 020
 ; bez fpu"). The previous file said 68040, which I chose on my own: it would have let 040-only code through.
@@ -44,7 +45,7 @@ z3mem_size=32
 kickstart_rom_file=C:\temp\amiga_bobr\ROM3.1_A4000.40.70.ROM
 ; --- Boot: plain AGA Workbench 3.1, mounted READ-ONLY. The game writes only to
 ;     PROGDIR: (Work:), so this is enforced rather than trusted. ---
-hardfile2=ro,DH0:C:\temp\amiga_bobr\boot.hdf,32,1,2,512,0,,uae
+hardfile2=rw,DH0:C:\temp\amiga_bobr\boot060.hdf,32,1,2,512,0,,uae
 ; --- WORK: the shared folder. Binaries, data and logs are swapped here from the
 ;     host without ever touching the HDF image. ---
 filesystem2=rw,WORK:Work:C:\temp\amiga_bobr\work,-128
@@ -77,5 +78,3 @@ sound_frequency=44100
 sound_interpol=none
 sound_filter=emulated
 sound_stereo_separation=10
-win32.minimized_pause=false
-win32.inactive_pause=false

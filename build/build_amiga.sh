@@ -40,7 +40,21 @@ ASM=vasmm68k_mot
 CPU="-mcpu=68020 -msoft-float"
 OPT="-O1"
 COMMON="$CPU $OPT -noixemul -fomit-frame-pointer"
+# What links. The same as COMMON, except in the 68060 build - see below.
+LINK="$COMMON"
 DEFS="-D__AMIGA__ -DCR_FIXED=1"
+# THE 68060 BUILD (BH_060=1, see build/build_amiga060.sh): the same game with its 16.16 arithmetic done in
+# instructions the 060 has in silicon (src/engine/fixed.h, CR_AMIGA_060). Its own build directory and binary name.
+BIN=bobrhopper
+if [ -n "$BH_060" ]; then
+    DEFS="$DEFS -DCR_AMIGA_060=1"
+    BIN=bobrhopper060
+    # OUR CODE IS COMPILED FOR THE 060, the libraries stay the 68020 ones. With -mcpu=68020 gcc turns every
+    # division by a constant (x / 10) into a 32x32->64 multiply by a magic number - the very instruction the 060
+    # traps on; for the 060 it uses the divide. The link keeps -mcpu=68020 on purpose: the link flags pick the
+    # multilib, and a 68040/060 one is the 68881 one (see the note at the top about -m68040).
+    COMMON="-mcpu=68060 -msoft-float $OPT -noixemul -fomit-frame-pointer"
+fi
 INCS="-I$WORK/src -I$WORK/src/amiga"
 CFLAGS="$COMMON $DEFS $INCS"
 CXXFLAGS="$COMMON -std=gnu++11 -fno-exceptions -fno-rtti $DEFS $INCS"
@@ -179,23 +193,23 @@ game)
     done
 
     echo "=== linking (never stripped)"
-    $CXX $COMMON -o "$WORK/bobrhopper" $OBJS -lamiga || exit 1
-    ls -la "$WORK/bobrhopper"
-    cp "$WORK/bobrhopper" "$DEPLOY/bobrhopper"
-    echo "=== deployed to $DEPLOY/bobrhopper"
+    $CXX $LINK -o "$WORK/$BIN" $OBJS -lamiga || exit 1
+    ls -la "$WORK/$BIN"
+    cp "$WORK/$BIN" "$DEPLOY/$BIN"
+    echo "=== deployed to $DEPLOY/$BIN"
 
     # The settings editor: a separate program, because what it edits decides how the game's screen is opened.
     echo "=== compiling BobrHopperPrefs"
     $CC $COMMON -I"$WORK/src/amiga" -c "$WORK/amiga/bhprefs.c" -o "$WORK/obj/bhprefs.o" || exit 1
-    $CC $COMMON -o "$WORK/BobrHopperPrefs" "$WORK/obj/bhprefs.o" "$WORK/obj/prefs_bh.o" -lamiga || exit 1
+    $CC $LINK -o "$WORK/BobrHopperPrefs" "$WORK/obj/bhprefs.o" "$WORK/obj/prefs_bh.o" -lamiga || exit 1
     cp "$WORK/BobrHopperPrefs" "$DEPLOY/BobrHopperPrefs"
     # The test machine's job runner (winuae/harness/bh_go.ps1) - deployed for testing, never packaged.
     $CC $COMMON -c "$WORK/amiga/bhloop.c" -o "$WORK/obj/bhloop.o" || exit 1
-    $CC $COMMON -o "$WORK/bhloop" "$WORK/obj/bhloop.o" -lamiga || exit 1
+    $CC $LINK -o "$WORK/bhloop" "$WORK/obj/bhloop.o" -lamiga || exit 1
     cp "$WORK/bhloop" "$DEPLOY/bhloop"
     # Both get the classic four-pen icon (tools/make_amiga_icon.py).
     if [ -f "$REPO/data_amiga/BobrHopper.info" ]; then
-        cp "$REPO/data_amiga/BobrHopper.info" "$DEPLOY/bobrhopper.info"
+        cp "$REPO/data_amiga/BobrHopper.info" "$DEPLOY/$BIN.info"
         cp "$REPO/data_amiga/BobrHopper.info" "$DEPLOY/BobrHopperPrefs.info"
     fi
     ;;

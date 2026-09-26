@@ -25,7 +25,7 @@ param(
   # sat down to play a build I had tested, and got a second player moving by itself, long freezes every so often,
   # and a game that quit after half a minute. Every one of those was my leftover file, not the game. So a plain
   # start now CLEARS it, and a bot run has to ask for one by name.
-  [ValidateSet("", "classic", "prog", "menu", "solo", "ask")]
+  [ValidateSet("", "classic", "prog", "menu", "solo", "ask", "god")]
   [string]$Auto = ""
 )
 
@@ -49,11 +49,14 @@ function Write-Lf([string]$path, [string]$text) {
 # game is asked to start, never after (see -Auto above).
 $autoPath = Join-Path $work "autoplay.txt"
 $profPath = Join-Path $work "profile.txt"
+# bgcache.txt switches the background cache off, into A/B, or into a self-check every 25th frame - a measuring
+# tool like the other two, and just as bad to leave behind for someone who sits down to play.
+$bgPath = Join-Path $work "bgcache.txt"
 if ($Auto -ne "") {
   Write-Lf $autoPath $Auto
   Write-Host "bh_go: autoplay.txt = '$Auto' - THIS IS A BOT RUN, not a game to hand to anybody"
 } else {
-  foreach ($p in @($autoPath, $profPath)) {
+  foreach ($p in @($autoPath, $profPath, $bgPath)) {
     if (Test-Path $p) {
       Remove-Item $p -Force
       Write-Host "bh_go: removed $(Split-Path $p -Leaf) left behind by an earlier test"
@@ -62,6 +65,9 @@ if ($Auto -ne "") {
 }
 
 $ours = @(Get-Ours)
+# A fresh machine has no game to ask to leave: a quit.req still lying here is left over from a run that never took it
+# (a crash, a hang), and the next game would read it and quit at once.
+if ($Restart -and (Test-Path $quitPath)) { Remove-Item $quitPath -Force }
 if ($Restart -and $ours.Count -gt 0) {
   & (Join-Path $PSScriptRoot "kill_ours.ps1") | Out-Null
   $ours = @()
@@ -70,7 +76,7 @@ if ($Restart -and $ours.Count -gt 0) {
 if ($ours.Count -gt 0) {
   # A game may be running: ask it to leave, and wait until it has taken the request (it deletes the file).
   Write-Lf $quitPath "quit`n"
-  $deadline = (Get-Date).AddSeconds(20)
+  $deadline = (Get-Date).AddSeconds(60)
   while ((Test-Path $quitPath) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
   if (Test-Path $quitPath) { Remove-Item $quitPath -Force }   # nothing was running to take it
   Start-Sleep 1

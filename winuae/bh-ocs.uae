@@ -72,3 +72,5 @@ sound_frequency=44100
 sound_interpol=none
 sound_filter=emulated
 sound_stereo_separation=10
+win32.minimized_pause=false
+win32.inactive_pause=false

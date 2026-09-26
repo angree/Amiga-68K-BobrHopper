@@ -433,6 +433,7 @@ void Game::checkIfUserHasFallenOutOfFrame(int player)
 // tests can fire in the same step - kept exactly, because the traces against the original show it.
 void Game::outOfFrame(int player)
 {
+    if (ctx_.invincible) return;
     rumble();
     // O24 K4.2: ...and with infinite respawn on, drifting off the side is a death like any other, so it brings the
     // hero back instead of ending the level - the user's rule is that such a level ends only by being crossed or
@@ -521,6 +522,7 @@ void Game::onCollide(const Collision &c)
     // O23: WHICH player was hit (null means the first, so every 1:1 call site is unchanged)
     const int pi = c.who ? c.who->index : 0;
     if (playerBlocked(pi)) return;
+    if (ctx_.invincible) return;
     Player &victim = heroes_[pi];
     victim.isAlive = false;
     victim.stopIdle(ctx_);

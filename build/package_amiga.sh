@@ -56,6 +56,17 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/data/meshes" "$STAGE/data/music"
 
 cp "$BIN" "$STAGE/bobrhopper"
+# THE 68060 BUILD (build/build_amiga060.sh): the same game without a single 64-bit multiply or divide in its own
+# code - instructions the 060 does not have and emulates by trap. Checked by build/check_060.sh; it must be as
+# fresh as the ordinary one.
+BIN060="$HOME/build-bobr060/bobrhopper060"
+[ -f "$BIN060" ] || { echo "no bobrhopper060 - run build/build_amiga060.sh first"; exit 1; }
+if [ "$BIN" -nt "$BIN060" ] && [ $(( $(stat -c %Y "$BIN") - $(stat -c %Y "$BIN060") )) -gt 3600 ]; then
+    echo "ERROR: bobrhopper060 is over an hour older than bobrhopper - rebuild it"
+    exit 1
+fi
+cp "$BIN060" "$STAGE/bobrhopper060"
+cp "$REPO/data_amiga/BobrHopper.info" "$STAGE/bobrhopper060.info"
 # The settings editor (AGA/RTG, screen bar), the classic four-pen icons for both programs, and the title's .tex
 # files - the shared home screen lays the logo out from the title's size. None of these were in the first packages.
 [ -f "$HOME/build-bobr/BobrHopperPrefs" ] || { echo "no BobrHopperPrefs - run build_amiga.sh game first"; exit 1; }
@@ -112,6 +123,12 @@ REQUIREMENTS
 INSTALL
   Copy the whole BobrHopper drawer wherever you like and double-click "bobrhopper".
   The game writes only inside its own drawer.
+
+68060: START "bobrhopper060" INSTEAD
+  The same game, built for the 68060. The 060 has no 32x32->64 multiply and no
+  64/32 divide in silicon - 68060.library emulates them by trapping, every time -
+  and the ordinary build uses them for all of its arithmetic. bobrhopper060 uses
+  none, and plays out bit for bit the same. On a 68020/030/040 use "bobrhopper".
 
 SETTINGS BEFORE THE GAME STARTS - BobrHopperPrefs
   Graphics     AGA, RTG, or OCS/ECS (Extra Half-Brite)

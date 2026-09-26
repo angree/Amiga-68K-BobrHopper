@@ -26,6 +26,46 @@ namespace cr {
 #define CR_FIXED_INLINE
 #endif
 
+#if defined(CR_AMIGA_060)
+// THE 68060 BUILD. The 060 has no 32x32->64 multiply and no 64/32 divide in silicon: each one traps and 68060.library
+// works it out in software, every time - and a 16.16 product is exactly such a multiply. People playing on 060s saw
+// teen frame rates. These do the same arithmetic with the instructions every 68k has, BIT FOR BIT the same results
+// (tests/test_fixed.cpp compares them with the 64-bit code on the PC).
+//
+// (a * b + round) >> 16, the low 32 bits: split both into a signed high and an unsigned low half,
+//   a*b = ah*bh*2^32 + (ah*bl + al*bh)*2^16 + al*bl
+// and every term but the last is a whole multiple of 2^16, so only al*bl + round needs shifting. Four 32-bit
+// multiplies, all of them exact; the sum wraps exactly as the 64-bit code's truncation does.
+constexpr int32_t fixedMulShr16(int32_t a, int32_t b, uint32_t round)
+{
+    return int32_t((uint32_t((a >> 16) * (b >> 16)) << 16) + uint32_t((a >> 16) * int32_t(uint32_t(b) & 0xffffu)) +
+                   uint32_t((b >> 16) * int32_t(uint32_t(a) & 0xffffu)) +
+                   (((uint32_t(a) & 0xffffu) * (uint32_t(b) & 0xffffu) + round) >> 16));
+}
+// (hi:lo) / d for hi < d, without the 64/32 divide: the 32/32 one when the dividend fits, two 16-bit steps of it
+// when the divisor does, and shift-and-subtract only when both are large (magnitudes of 1.0 and more on each side).
+inline uint32_t fixedDiv6432(uint32_t hi, uint32_t lo, uint32_t d)
+{
+    if (hi == 0) return lo / d;
+    if (d <= 0xffffu) {
+        const uint32_t n1 = (hi << 16) | (lo >> 16);
+        const uint32_t q1 = n1 / d, r1 = n1 - q1 * d;
+        const uint32_t n2 = (r1 << 16) | (lo & 0xffffu);
+        return (q1 << 16) | (n2 / d);
+    }
+    for (int i = 0; i < 32; i++) {
+        const uint32_t top = hi >> 31;
+        hi = (hi << 1) | (lo >> 31);
+        lo <<= 1;
+        if (top || hi >= d) {
+            hi -= d;
+            lo |= 1u;
+        }
+    }
+    return lo;
+}
+#endif
+
 struct Fixed {
     int32_t v = 0; // raw value * 65536
 
@@ -60,7 +100,11 @@ struct Fixed {
     CR_FIXED_INLINE friend constexpr Fixed operator-(Fixed a, Fixed b) { return fromRaw(a.v - b.v); }
     CR_FIXED_INLINE friend constexpr Fixed operator*(Fixed a, Fixed b)
     {
+#if defined(CR_AMIGA_060)
+        return fromRaw(fixedMulShr16(a.v, b.v, 32768u));
+#else
         return fromRaw(int32_t((int64_t(a.v) * int64_t(b.v) + 32768) >> 16));
+#endif
     }
     // division by zero gives 0 (JavaScript would give Infinity/NaN; the game guards those cases anyway)
     CR_FIXED_INLINE friend Fixed operator/(Fixed a, Fixed b)
@@ -78,12 +122,17 @@ struct Fixed {
             lo += half;
             if (lo < half) hi++;
             if (hi >= ub) return fromRaw((a.v ^ b.v) < 0 ? int32_t(0x80000001) : int32_t(0x7fffffff)); // would not fit
+#if defined(CR_AMIGA_060)
+            const uint32_t q = fixedDiv6432(hi, lo, ub);
+            return fromRaw((a.v ^ b.v) < 0 ? -int32_t(q) : int32_t(q));
+#else
             register uint32_t q __asm__("d0") = lo;
             register uint32_t r __asm__("d1") = hi;
             register uint32_t d __asm__("d2") = ub;
             __asm__("divul %2,%1:%0" : "+d"(q), "+d"(r) : "d"(d));
             (void)r;
             return fromRaw((a.v ^ b.v) < 0 ? -int32_t(q) : int32_t(q));
+#endif
         }
 #endif
         // C division truncates toward zero, so half the divisor is added away from zero: round half away from zero
@@ -128,12 +177,20 @@ inline Fixed fixedSinTurn(uint32_t turn)
     const uint32_t index = turn >> (32 - kSinTableBits);
     const int32_t frac = int32_t((turn >> (32 - kSinTableBits - 16)) & 0xffff);
     const int32_t a = kSinQ16[index], b = kSinQ16[index + 1];
+#if defined(CR_AMIGA_060)
+    return Fixed::fromRaw(a + fixedMulShr16(b - a, frac, 0));
+#else
     return Fixed::fromRaw(a + int32_t((int64_t(b - a) * frac) >> 16));
+#endif
 }
 inline uint32_t fixedTurn(Fixed radians)
 {
     // 2^32 / (2 pi) in 16.16 = 683565275.6
+#if defined(CR_AMIGA_060)
+    return uint32_t(fixedMulShr16(radians.v, 683565276, 0));
+#else
     return uint32_t((int64_t(radians.v) * 683565276LL) >> 16);
+#endif
 }
 inline Fixed fixedSin(Fixed radians) { return fixedSinTurn(fixedTurn(radians)); }
 inline Fixed fixedCos(Fixed radians) { return fixedSinTurn(fixedTurn(radians) + 0x40000000u); }

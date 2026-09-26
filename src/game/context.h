@@ -79,6 +79,9 @@ struct GameContext {
     // more than half of the whole logic step, for decoration at x = +-4.5 - the very edge of a 320-pixel view.
     // It draws from the fx random stream only, which feeds nothing but visuals.
     bool foam = true;
+    // A MEASURING AID, never a setting: nothing kills the hero. The Amiga's "god" bot (autoplay.txt) plays one
+    // unbroken game with it, so a frame rate is measured over play and not over game-over screens. Off everywhere.
+    bool invincible = false;
     // O23 (two players): every row must offer at least TWO columns to walk on, not one, so the two players are never
     // forced through the same gap. Set by Game::setPlayerCount; it only ever loosens a row, and with one player it
     // stays false, so the rows a single player gets are drawn from the same random numbers as before.
