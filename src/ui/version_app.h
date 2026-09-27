@@ -8,6 +8,6 @@
 
 namespace cr {
 
-const char *const kAppVersion = "v025";
+const char *const kAppVersion = "v026";
 
 } // namespace cr
