@@ -170,6 +170,9 @@ ART_PINS = [
     # the right way round: the beaver stands ON the log, so the log is the background and gives way.
     ("log light", (0xBB, 0x99, 0x77)),
     ("log dark", (0x88, 0x66, 0x55)),
+    # A RED. The title logo (the beaver's cap, the cock's comb) is dithered onto these 64 pens, and without a
+    # saturated red it came out brown; the red cars and the train are better for it too.
+    ("red", (0xDD, 0x22, 0x22)),
 ]
 
 # THE LOGS ARE DRAWN IN THOSE TWO PENS AND NOTHING ELSE. Banning the beaver's pen was not enough - the search
@@ -288,6 +291,12 @@ FLOOR_NAMES = ("grass_0", "grass_1", "road_0", "road_1", "river", "railroad")
 # shadows that overlap do not come out darker. The header's fourth word says where they start (0 = none).
 # EHB sets need none: the chipset's half-brite IS a shadow table, pen N + 32 at half the brightness.
 SHADE = 0.841
+
+# THE TITLE LOGO (tools/make_amiga_logo.py) is a painted picture with thousands of colours, not flat-shaded art.
+# It is kept out of the art's colour count, so the game keeps exactly the palette it had; the 256-colour sets then
+# give it whatever entries are left (a median cut of its own pixels), and every logo pixel takes the nearest of the
+# whole palette. EHB has no entries to spare, so there the logo is dithered (Floyd-Steinberg) onto the 64 pens.
+LOGO_NAME = "logo"
 SHADE_PREFIXES = FLOOR_NAMES + ("log_", "lily_pad")
 
 
@@ -324,6 +333,38 @@ def seal_floor_edge(img, e, grow=1):
     return out
 
 
+def dither_to(img, palette, first):
+    """Floyd-Steinberg onto palette[first:]; transparent stays 0. For the logo on a 64-pen EHB screen."""
+    w, h = img.size
+    px = img.load()
+    err = [[0.0, 0.0, 0.0] for _ in range(w * h)]
+    out = bytearray(w * h)
+    cands = [(i, palette[i]) for i in range(first, len(palette))]
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a < 128:
+                continue
+            e = err[y * w + x]
+            want = (min(255, max(0, r + e[0])), min(255, max(0, g + e[1])), min(255, max(0, b + e[2])))
+            bi, bd = first, None
+            for i, c in cands:
+                d = (want[0] - c[0]) ** 2 + (want[1] - c[1]) ** 2 + (want[2] - c[2]) ** 2
+                if bd is None or d < bd:
+                    bi, bd = i, d
+            out[y * w + x] = bi
+            c = palette[bi]
+            de = (want[0] - c[0], want[1] - c[1], want[2] - c[2])
+            for dx, dy, f in ((1, 0, 7 / 16.0), (-1, 1, 3 / 16.0), (0, 1, 5 / 16.0), (1, 1, 1 / 16.0)):
+                xx, yy = x + dx, y + dy
+                if 0 <= xx < w and yy < h and px[xx, yy][3] >= 128:
+                    t = err[yy * w + xx]
+                    t[0] += de[0] * f
+                    t[1] += de[1] * f
+                    t[2] += de[2] * f
+    return bytes(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="indir", default="out/check/amiga/sprites")
@@ -354,6 +395,8 @@ def main():
             img = seal_floor_edge(img, e, args.seal)
         px = img.load()
         images.append(img)
+        if e["name"] == LOGO_NAME:
+            continue  # its colours are chosen separately, after the art's (see "the title logo" below)
         for y in range(e["h"]):
             for x in range(e["w"]):
                 r, g, b, a = px[x, y]
@@ -430,11 +473,46 @@ def main():
         print("colours in the art: %d%s" % (len(ordered),
               "" if not merged else "  (%d rarest merged into their nearest neighbour)" % merged))
 
+    # The shadow twins (computed here, placed after the logo's colours) and the title logo's own colours.
+    twin_first = 0
+    twins = []
+    if not args.ehb:
+        for c, _ in shade_counts.most_common():
+            i = index_of.get(c)
+            if i is None:
+                continue  # merged away: its pixels use a neighbour's index, which gets its own twin
+            t = tuple(int(round(v * SHADE)) for v in palette[i])
+            if t not in twins:
+                twins.append(t)
+        logo = [(e, img) for e, img in zip(entries, images) if e["name"] == LOGO_NAME]
+        room = MAX_COLORS - len(palette) - len(twins)
+        if logo and room > 0:
+            img = logo[0][1]
+            opaque = [p[:3] for p in img.getdata() if p[3] >= 128]
+            strip = Image.new("RGB", (len(opaque), 1))
+            strip.putdata(opaque)
+            q = strip.quantize(colors=room, method=Image.Quantize.MEDIANCUT)
+            qp = q.getpalette()[:room * 3]
+            used = sorted(set(q.getdata()))
+            logo_cols = [tuple(qp[i * 3:i * 3 + 3]) for i in used]
+            palette.extend(logo_cols)
+            print("title logo: %d colours of its own (%d painted pixels)" % (len(logo_cols), len(opaque)))
+        room = MAX_COLORS - len(palette)
+        if twins and room > 0:
+            twin_first = len(palette)
+            palette.extend(twins[:room])
+        print("shadow twins: %d floor colours, %d twins from index %d%s" % (
+            len(shade_counts), min(len(twins), max(room, 0)), twin_first,
+            "" if len(twins) <= room else "  (%d had no room - they shade to their nearest)" % (len(twins) - room)))
+
     # Pass 2: pixels.
     blobs = []
     for e, img in zip(entries, images):
         # The logs are painted in their own two pens and nothing else, so no log pixel can come out the colour
         # of the beaver standing on it. Only the logs: nothing else sits under the animal.
+        if args.ehb and e["name"] == LOGO_NAME:
+            blobs.append(dither_to(img, palette, 1))
+            continue
         is_log = args.ehb and e["name"].startswith(LOG_PREFIX)
         cache = log_index_of if is_log else index_of
         px = img.load()
@@ -458,25 +536,6 @@ def main():
                     cache[key] = i
                 data[row + x] = i
         blobs.append(bytes(data))
-
-    # The shadow twins, after the art, in the room that is left - most used first.
-    twin_first = 0
-    if not args.ehb:
-        twins = []
-        for c, _ in shade_counts.most_common():
-            i = index_of.get(c)
-            if i is None:
-                continue  # merged away: its pixels use a neighbour's index, which gets its own twin
-            t = tuple(int(round(v * SHADE)) for v in palette[i])
-            if t not in twins:
-                twins.append(t)
-        room = MAX_COLORS - len(palette)
-        if twins and room > 0:
-            twin_first = len(palette)
-            palette.extend(twins[:room])
-        print("shadow twins: %d floor colours, %d twins from index %d%s" % (
-            len(shade_counts), min(len(twins), max(room, 0)), twin_first,
-            "" if len(twins) <= room else "  (%d had no room - they shade to their nearest)" % (len(twins) - room)))
 
     os.makedirs(args.outdir, exist_ok=True)
     header_size = 12 + 768

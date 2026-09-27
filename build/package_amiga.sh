@@ -193,7 +193,8 @@ CONTROLS
   settings (S)   S, Tab                green
   Esc always goes back one step: out of a menu, out of the settings, from the game
   to the pause menu - and from the title screen out of the game.
-  quit           Esc on the title screen, or Exit in the pause menu
+  quit           Esc on the title screen, then Enter to confirm (Esc again stays),
+                 or Exit in the pause menu
 
   After a game:  A / fire = play again,  S / stick left = back to the menu.
 

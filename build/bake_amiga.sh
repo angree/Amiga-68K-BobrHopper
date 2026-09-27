@@ -41,7 +41,9 @@ bake_one() {
     # The title logo is not a model, so the baker knows nothing about it: tools/make_amiga_logo.py drops it into
     # the same directory and adds its line to sprites.txt, and the packer then treats it like any other sprite.
     # Leaving this out is how the first run of this script produced a set with no logo on the title screen.
-    python tools/make_amiga_logo.py --sprites "$dir" --width "$logow" >> "$dir/bake.log" 2>&1 ||
+    # the author's own logo picture, fitted into 256x88 (512x176 at 640x480): the home screen's logo box with three bars
+    python tools/make_amiga_logo.py --sprites "$dir" --png assets_extra/bobr_logo_amiga.png \
+        --width $((logow * 256 / 172)) --height $((logow * 88 / 172)) >> "$dir/bake.log" 2>&1 ||
         { echo "logo failed - see $dir/bake.log"; tail -5 "$dir/bake.log"; exit 1; }
     python tools/pack_amiga_sprites.py --in "$dir" --out data_amiga --name "$file" --seal "$seal" ${ehb:+--ehb} \
         --header out/check/amiga/ids/"$name".h > "$dir/pack.log" 2>&1 ||

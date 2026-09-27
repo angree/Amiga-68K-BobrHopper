@@ -2502,6 +2502,8 @@ struct AutoPlay {
     bool progression = false, wentDown = false;
     bool menuWalk = false; // "menu" in autoplay.txt: open the settings and step down the list, for screenshots
     bool viewWalk = false; // "view": open the settings, step to SCREEN, one press right, back - the shape swap
+    bool titleShot = false; // "title": press nothing, profile on - the title screen dumped at frame 60, logo and all
+    bool quitShot = false;
     bool soloKeys = false; // "solo" in autoplay.txt: press the arrows only, and see that player two stays put
     bool askShot = false;  // "ask" in autoplay.txt: one press of A on the title, then nothing
     bool god = false;      // "god": the classic bot, and nothing kills the hero - one long game to measure
@@ -2519,6 +2521,8 @@ struct AutoPlay {
                 // at, and there is no way to press a key from the host (that once typed into the user's browser).
                 if (word[0] == 'm') menuWalk = true;
                 if (word[0] == 'v') viewWalk = true;
+                if (word[0] == 't') titleShot = true;
+                if (word[0] == 'q') quitShot = titleShot = true; // "quit": the title with the quit question open
                 // "solo" presses ONLY the arrows, exactly as a person at the keyboard would - the shared mask and
                 // the arrows device together, the WSAD device untouched. With two players only player one may
                 // move. It exists because the user found the opposite by playing, and no unattended run could
@@ -2530,8 +2534,9 @@ struct AutoPlay {
                 if (word[0] == 'g') god = true;
             }
             fclose(f);
-            on = !menuWalk && !soloKeys && !askShot && !viewWalk;
+            on = !menuWalk && !soloKeys && !askShot && !viewWalk && !titleShot;
             scripted = 1; // one press of A, to get past the title screen into a game
+            if (titleShot) scripted = 0; // "title" presses nothing at all
             printf("game: autoplay is on - %s\n",
                    menuWalk ? "walking the settings list" : progression ? "hopping by itself (PROGRESSION)"
                                                                         : "hopping by itself (classic)");
@@ -2684,6 +2689,9 @@ int main(void)
     BHSurface view = surface;
     int viewX = 0, blitX0 = 0, blitX1 = surface.width;
     bool lastBlitFull = true;
+    // ESC ON THE TITLE ASKS FIRST: "quit the game?", confirmed with Enter, Esc again to stay. Nothing else reaches
+    // the game while it asks, so a stray key cannot start a game behind the question either.
+    bool quitAsk = false;
     auto setupView = [&]() {
         view = surface;
         viewX = 0;
@@ -2843,7 +2851,7 @@ int main(void)
     AutoPlay autoplay;
     {
         FILE *f = fopen("PROGDIR:profile.txt", "r");
-        gProfiling = autoplay.on || autoplay.menuWalk || autoplay.viewWalk || compare.on || f != 0;
+        gProfiling = autoplay.on || autoplay.menuWalk || autoplay.viewWalk || autoplay.titleShot || compare.on || f != 0;
         if (f) fclose(f);
     }
     if (gProfiling && bh_clock_open()) game.profileClock = &Micros::now;
@@ -3148,9 +3156,14 @@ int main(void)
                 // ESC GOES BACK ONE STEP - the author's rule. On the title's first page there is no step left, so
                 // it leaves the game; in play it opens the pause menu (back from the game); everywhere else - the
                 // settings, the pause menu, the game-over screen, the title's inner pages - it is B.
+                if (quitAsk && (ev.code & 0x80) == 0) {
+                    if (raw == 0x44 || raw == 0x43) session.quit = true; // Return, or Enter on the keypad
+                    else if (raw == 0x45) quitAsk = false;                // Esc: no, stay
+                    continue;                                             // every other key: nothing
+                }
                 if (raw == 0x45 && (ev.code & 0x80) == 0 && game.state() == GameState::None &&
                     session.screens.menu() == Menu::None && session.screens.atHomeTop()) {
-                    session.quit = true;
+                    quitAsk = true;
                     continue;
                 }
                 uint16_t button = buttonForKey(raw);
@@ -3230,6 +3243,8 @@ int main(void)
                 Snapshot snap;
                 for (int d = 0; d < 5; d++) snap.mask[d] = devHeld[d];
                 if (queuedAt < queued.size()) snap = queued[queuedAt++];
+                if (quitAsk)
+                    for (int d = 0; d < 5; d++) snap.mask[d] = 0; // the question holds every button
                 // O23: each player's device gets its OWN bot, so an unattended two-player run really plays two
                 // games at once; every other device (and the menus) get the first bot, as before.
                 // O24: silent while the startup script is still walking the menus - see scriptFrames.
@@ -3332,6 +3347,7 @@ int main(void)
         renderer.setDetail(dumpingNow);
         profSound += profMicros() - tSound0;
         const unsigned long tRender0 = profMicros();
+        if (autoplay.quitShot && frames == 20) quitAsk = true;
         if (needRedraw) {
             renderer.forceClear();
             needRedraw = false;
@@ -3371,6 +3387,21 @@ int main(void)
                 drawHud(ui, text, game, uiW, uiH);
             }
             session.screens.draw(ui, text, game, uiW, uiH);
+            if (quitAsk) {
+                // the question, in a window of the menus' purple over whatever the title shows
+                const bool pl = lang::current() == 1;
+                const Rgba white{1, 1, 1, 1}, black{0, 0, 0, 1};
+                const int bw = 460, bh = 128, bx = (uiW - bw) / 2, by = (uiH - bh) / 2;
+                ui.beginOverlay(uiW, uiH);
+                ui.drawOverlayRect(mreal(bx - 4), mreal(by - 4), mreal(bw + 8), mreal(bh + 8), 0, 0, 0, 1);
+                ui.drawOverlayRect(mreal(bx), mreal(by), mreal(bw), mreal(bh), 0x6A / 255.0f, 0x40 / 255.0f,
+                                   0xEB / 255.0f, 1);
+                const std::string q = pl ? "WYJŚĆ Z GRY?" : "QUIT THE GAME?";
+                const std::string h = pl ? "ENTER - TAK     ESC - NIE" : "ENTER - YES     ESC - NO";
+                text.drawOutlined(ui, q, (uiW - text.width(q, 18)) / 2, by + 26, 18, white, 2, black);
+                text.drawOutlined(ui, h, (uiW - text.width(h, 12)) / 2, by + 80, 12, white, 2, black);
+                ui.endOverlay();
+            }
         }
         ui.surface = &surface;
         profUi += profMicros() - tUi0;

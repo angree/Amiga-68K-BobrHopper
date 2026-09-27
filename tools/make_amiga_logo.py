@@ -75,15 +75,32 @@ def main():
     # used to be 256 and the right size was passed by hand - until the day it was not, and the user got a logo
     # half as big again as on the consoles.
     ap.add_argument("--width", type=int, default=172, help="target width in pixels (172 = the console layout)")
+    # THE AMIGA'S OWN LOGO (the author's picture, assets_extra/bobr_logo_amiga.png): a painted image, so it is
+    # fitted into --width x --height and scaled SMOOTHLY - nearest-neighbour would shred a picture this detailed.
+    # The packer gives it the palette's free entries (or dithers it, on EHB).
+    ap.add_argument("--png", default="", help="a PNG picture to use instead of the console logo")
+    ap.add_argument("--height", type=int, default=0, help="with --png: the most height it may take")
     args = ap.parse_args()
 
-    img = load_crt1(args.tex)
-    box = img.getbbox()  # the texture is mostly transparent margin
-    if box:
-        img = img.crop(box)
-    scale = args.width / float(img.width)
-    size = (args.width, max(1, int(round(img.height * scale))))
-    img = img.resize(size, Image.NEAREST)
+    if args.png:
+        img = Image.open(args.png).convert("RGBA")
+        alpha = img.split()[3].point(lambda v: 255 if v >= 128 else 0)
+        box = alpha.getbbox()
+        if box:
+            img = img.crop(box)
+        scale = args.width / float(img.width)
+        if args.height and img.height * scale > args.height:
+            scale = args.height / float(img.height)
+        size = (max(1, int(round(img.width * scale))), max(1, int(round(img.height * scale))))
+        img = img.convert("RGBa").resize(size, Image.LANCZOS).convert("RGBA") # premultiplied: no dark fringe
+    else:
+        img = load_crt1(args.tex)
+        box = img.getbbox()  # the texture is mostly transparent margin
+        if box:
+            img = img.crop(box)
+        scale = args.width / float(img.width)
+        size = (args.width, max(1, int(round(img.height * scale))))
+        img = img.resize(size, Image.NEAREST)
 
     # Anything half-transparent becomes fully transparent: the blitter has no blending, so a soft edge would
     # otherwise turn into a fringe of solid pixels around every letter.
