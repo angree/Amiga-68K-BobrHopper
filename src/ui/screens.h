@@ -114,6 +114,14 @@ public:
     // The title screen's menu gets a third bar, SETTINGS, below Classic and Progression (the Amiga: a keyboard
     // player should not have to know that S opens them). Off by default - the consoles keep their two bars.
     bool homeSettings = false;
+    // The platform has only simple shadows (the Amiga): the Shadows entry offers SIMPLE and OFF, and a stored FULL
+    // reads as SIMPLE. Off by default.
+    bool simpleShadowsOnly = false;
+    // The pause and settings menus as a WINDOW with a solid background (the Amiga): a strip of the frozen game stays
+    // visible above (menuGapTop) and below (menuGapBottom), in logical pixels, and nothing else is drawn under the
+    // window. The dithered see-through backdrop is the slowest thing a menu draws there. Off by default.
+    bool solidMenus = false;
+    int menuGapTop = 20, menuGapBottom = 8;
     // the title's first page, where there is nothing left to go back to (the Amiga's Esc then leaves the game)
     bool atHomeTop() const { return homePage_ == HomePage::Modes; }
     // O23: the input devices this platform offers, in the order the settings screen steps through them (for example
@@ -125,6 +133,7 @@ private:
     void drawHome(Renderer &renderer, TextRenderer &text, int screenW, int screenH);
     void drawGameOver(Renderer &renderer, TextRenderer &text, const Game &game, int screenW, int screenH);
     void drawPause(Renderer &renderer, TextRenderer &text, int screenW, int screenH);
+    void menuWindow(Renderer &renderer, int screenW, int screenH); // the backdrop, or the solid window
     void drawSettings(Renderer &renderer, TextRenderer &text, int screenW, int screenH);
     // O11.2: the game over screen's banners, in the home screen's colours, as menu items
     void drawMenuBars(Renderer &renderer, TextRenderer &text, const std::string *labels, int count, int cursor, int w,

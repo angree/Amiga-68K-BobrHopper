@@ -157,6 +157,15 @@ SCREEN SHAPE (in the game's settings)
   moment) - only one set is ever in memory. AGA and RTG, 320x240 and 640x480;
   not in the OCS/ECS mode.
 
+SHADOWS (in the game's settings: SIMPLE or OFF, OFF to begin with)
+  Everything that casts a shadow on the consoles casts one here: trees, rocks,
+  cars, trains, logs, the beaver. They cost some speed - about a fifth of the
+  frame rate on the test machine - so they start switched off.
+
+MENUS
+  The pause menu and the settings are a window over the frozen game: nothing
+  moves underneath while one is open, so the menus answer quickly.
+
 TWO PLAYERS
   Settings -> Players -> 2 PLAYERS, then give each player a device of its own:
     ARROWS   cursor keys, Space or Return to hop forward

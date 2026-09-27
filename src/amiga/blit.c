@@ -264,8 +264,24 @@ void bh_fill_rect(const BHSurface *dst, int x, int y, int w, int h, unsigned cha
     if (w <= 0 || h <= 0) return;
 
     out = dst->pixels + (unsigned long)y * (unsigned long)pitch + (unsigned long)x;
-    for (r = 0; r < h; r++) {
-        for (c = 0; c < w; c++) out[c] = index;
-        out += pitch;
+    {
+        /* long words for the middle of each row: a menu's solid window is ~70000 bytes a frame */
+        const unsigned long fill = (unsigned long)index * 0x01010101UL;
+        for (r = 0; r < h; r++) {
+            unsigned char *op = out;
+            int n = w;
+            while (n > 0 && ((unsigned long)op & 3)) { *op++ = index; n--; }
+            while (n >= 16) {
+                ((unsigned long *)op)[0] = fill;
+                ((unsigned long *)op)[1] = fill;
+                ((unsigned long *)op)[2] = fill;
+                ((unsigned long *)op)[3] = fill;
+                op += 16; n -= 16;
+            }
+            while (n >= 4) { *(unsigned long *)op = fill; op += 4; n -= 4; }
+            while (n-- > 0) *op++ = index;
+            out += pitch;
+        }
+        (void)c;
     }
 }

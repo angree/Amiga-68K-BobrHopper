@@ -141,8 +141,16 @@ struct SpriteSet {
     char layer;
     // P3: the ground and what never moves on it - trees and boulders - are the BACKGROUND, kept in the cache
     bool stat;
-    SpriteSet() : rotCount(1), hero(false), layer(0), stat(false)
+    // SIMPLE SHADOWS: does this model cast one (Model::castShadow), where the floor's top is (a floor model), and per
+    // baked direction the outline of its bounding box flattened onto the floor along the light - a convex polygon of
+    // up to eight points, as screen offsets in the projection's raw units (see AmigaRenderer::init)
+    bool caster;
+    long floorTop;
+    unsigned char hullN[BH_ROT_MAX];
+    long hullX[BH_ROT_MAX][8], hullY[BH_ROT_MAX][8];
+    SpriteSet() : rotCount(1), hero(false), layer(0), stat(false), caster(false), floorTop(0)
     {
+        for (int r = 0; r < BH_ROT_MAX; r++) hullN[r] = 0;
         for (int r = 0; r < BH_ROT_MAX; r++) {
             rot[r] = -1;
             for (int p = 0; p < BH_HERO_PHASE_COUNT; p++) phase[r][p] = -1;
@@ -172,6 +180,9 @@ struct Item {
     // has the same two numbers in every frame - and whether the item is background (kept in the cache) or moves.
     long wx, wy;
     bool stat;
+    // a SHADOW (id -2): its convex outline on screen
+    short px[8], py[8];
+    unsigned char np;
 };
 
 // P3: a rectangle, in world or screen pixels depending on who holds it
@@ -323,6 +334,10 @@ public:
             if (it->second.receiveShadow && !it->second.castShadow) set.layer = 1;
             else if (it->first.compare(0, 3, "log") == 0 || it->first == "lily_pad") set.layer = 2;
             set.stat = set.layer == 1 || it->first.compare(0, 4, "tree") == 0 || it->first.compare(0, 7, "boulder") == 0;
+            set.caster = it->second.castShadow;
+            // the surface shadows fall on: the top of the floor box, except the railroad's ground under its ties and
+            // rails (the same rule as src/game/scene_render.cpp floorTop)
+            set.floorTop = long((it->first == "railroad" ? real(0.25) : it->second.aabbMax.y).v);
             sets_[&it->second] = set;
         }
         // THE MODEL CARRIES ITS OWN SPRITE SET. Model::mesh is "the renderer's handle for this model" and is null
@@ -357,6 +372,7 @@ public:
                    (long)kx_[1], (long)kx_[2], (long)ky_[0], (long)ky_[1], (long)ky_[2], (long)kz_[0], (long)kz_[1],
                    (long)kz_[2]);
         }
+        buildShadows();
         printf("renderer: %d models mapped to sprites\n", (int)sets_.size());
         // P3: a new sprite set (this runs again on every swap) - new one-way edges, new tight boxes, and nothing in
         // the background cache may survive: every pixel of it was drawn from the old set.
@@ -379,6 +395,8 @@ public:
             noid_.clear();
         }
         origin_ = game.cameraPosition();
+        if (shadowsOn_) heroPlanes(game);
+        shadowCount_ = 0;
         if (worldCoords_ != bgOn_) bgValid_ = false;
         worldCoords_ = bgOn_;
         if (worldCoords_) {
@@ -486,15 +504,7 @@ public:
             // every item here - two timer.device calls a sprite, a hundred sprites a frame - and the draw time it
             // reported was partly its own cost. The draw is now timed whole (profBlit_), the layers by counters.
             bh_stat_layer = it.layer == 0 ? 0 : 1;
-            if (it.id < 0) {
-                fillQuad(surface, it.qx, it.qy, it.colour);
-            } else if (it.clipY > 0) {
-                BHSurface cut = surface; // same pixels, shorter: the blitter's own clip does the rest
-                if (it.clipY < cut.height) cut.height = it.clipY;
-                bh_blit_at_anchor(&cut, sprites_, it.id, it.x, it.y);
-            } else {
-                bh_blit_at_anchor(&surface, sprites_, it.id, it.x, it.y);
-            }
+            drawItem(surface, it);
         }
         {
             const unsigned long t = profMicros();
@@ -517,6 +527,32 @@ public:
         profBlit_ += profMicros() - t3;
         drawFrames_++;
     }
+    /* WHERE EACH HERO'S SHADOW FALLS - a function of its own: inside render() this block made gcc 6.5 crash (an
+     * internal compiler error) when building for the 68060. */
+    void heroPlanes(Game &game)
+    {
+        // WHERE EACH HERO'S SHADOW FALLS, as the consoles decide it (scene_render.cpp): on the log it rides, or on
+        // its row's floor - in the world group's own space; walk() adds the group's height when it meets the hero
+        for (int i = 0; i < (game.playerCount() > 1 ? 2 : 1); i++) {
+            const Player &h = game.hero(i);
+            long local = long(real(0.375).v);
+            const RowRef *rowRef = game.map().getRow(real(jsRound(h.position().z)));
+            if (h.ridingOn && h.ridingOn->mesh && h.ridingOn->mesh->model) {
+                local = long(h.ridingOn->mesh->position.y.v) + long(h.ridingOn->mesh->model->aabbMax.y.v);
+            } else if (rowRef) {
+                const cr::Node *floor = rowRef->type == RowType::Grass   ? rowRef->grass->floor
+                                        : rowRef->type == RowType::Water ? rowRef->water->floor
+                                        : rowRef->type == RowType::Road  ? rowRef->road->road
+                                                                         : rowRef->railRoad->railRoad;
+                if (floor && floor->model) {
+                    const SpriteSet *fs = reinterpret_cast<const SpriteSet *>(floor->model->mesh);
+                    local = fs ? fs->floorTop : long(floor->model->aabbMax.y.v);
+                }
+            }
+            heroPlaneLocal_[i] = local;
+        }
+    }
+
     unsigned long drawFrames_ = 0, profSentinel_ = 0;
 
     unsigned long profWorld_ = 0, profCollect_ = 0, profSort_ = 0, profBlit_ = 0, profNodes_ = 0;
@@ -541,6 +577,9 @@ public:
             printf("profile/pixels: the whole draw %lu us a frame over %lu frames: before the loop (sky or sentinels) %lu, "
                    "ground %lu, objects %lu, after (sentinel check) %lu\n", profBlit_ / n, drawFrames_, profClear_ / n,
                    profFloors_ / n, profObjects_ / n, profSentinel_ / n);
+            printf("profile/shadows: %s, %lu a frame, %lu rows, %lu pixels darkened\n", shadowsOn_ ? "on" : "off",
+                   shadowItems_ / n, shadowRows_ / n, shadowPx_ / n);
+            shadowItems_ = shadowRows_ = shadowPx_ = 0;
             if (bgOn_ || bgFrames_) {
                 const unsigned long m = bgFrames_ ? bgFrames_ : 1UL;
                 printf("profile/bgcache: per frame - paint %lu us (%lu px in %lu pieces, %lu full repaints over %lu frames),"
@@ -574,6 +613,12 @@ public:
 
     // ---- P3: the background cache (docs/PLAN_BGCACHE.md) ----
     void setBgCache(bool on) { bgOn_ = on; }
+    // SIMPLE SHADOWS on or off (the Shadows setting). The cache holds the trees' shadows, so a change repaints it.
+    void setShadows(bool on)
+    {
+        if (on != shadowsOn_) bgValid_ = false;
+        shadowsOn_ = on;
+    }
     bool bgCache() const { return bgOn_; }
 
     /* THE WHOLE FRAME the old way - every item of the list, in the painter's order, over the sky. The self-check
@@ -597,12 +642,20 @@ public:
         ref.width = W;
         ref.height = H;
         drawCollected(ref);
-        unsigned long diff = 0;
+        unsigned long diff = 0, edge = 0;
         int minx = W, miny = H, maxx = -1, maxy = -1;
         for (int y = 0; y < H; y++) {
             const unsigned char *a = surface.pixels + (long)y * surface.pitch, *b = ref.pixels + (long)y * W;
             for (int x = 0; x < W; x++)
                 if (a[x] != b[x]) {
+                    // A SHADOW'S EDGE where two rows meet: one picture has the colour, the other exactly its shadow.
+                    // Moving shadows darken only the ground and are laid down without the nearer floor redrawn over
+                    // them (compose), so a line of pixels on a row boundary can differ from the old painter. Counted
+                    // apart; anything else is still a fault.
+                    if (shadowsOn_ && (shade_[a[x]] == b[x] || shade_[b[x]] == a[x])) {
+                        edge++;
+                        continue;
+                    }
                     diff++;
                     if (x < minx) minx = x;
                     if (x > maxx) maxx = x;
@@ -614,6 +667,7 @@ public:
         if (diff) checksBad_++;
         printf("bgcache check %lu: %lu pixels differ", checks_, diff);
         if (diff) printf(" in %d,%d..%d,%d", minx, miny, maxx, maxy);
+        if (edge) printf(", %lu more on a shadow's edge", edge);
         printf(" (window %ld,%ld)\n", xw_, yw_);
         if (diff && badDumps_ < 4) {
             static const char *const kA[4] = {"PROGDIR:bc0_cache.raw", "PROGDIR:bc1_cache.raw", "PROGDIR:bc2_cache.raw", "PROGDIR:bc3_cache.raw"};
@@ -738,6 +792,7 @@ private:
             if (node != heroNode_[hi]) continue;
             // floor(z + 0.05), in the same space as the rows
             if (!heroDead_[hi]) heroRow_[hi] = int((pos.z.v - worldZ_ + 3277) >> 16);
+            heroPlaneY_[hi] = long(pos.y.v) - long(node->position.y.v) + heroPlaneLocal_[hi];
             row = heroRow_[hi];
             curHero_ = hi;
             break;
@@ -746,6 +801,7 @@ private:
         const int myRow = row != kNoRow ? row : int((pos.z.v - worldZ_ + 32768) >> 16);
 
         if (node->model) {
+            curPosY_ = long(pos.y.v);
             if (census_) seen_[node->model->name]++;
             const SpriteSet *set = reinterpret_cast<const SpriteSet *>(node->model->mesh);
             if (set) add(node, *set, rx, ry, rz, rotFromMatrix, myRow);
@@ -806,7 +862,7 @@ private:
             item.qx[1] = short(sx + e); item.qy[1] = short(sy - h);
             item.qx[2] = short(sx + e); item.qy[2] = short(sy + e);
             item.qx[3] = short(sx - h); item.qy[3] = short(sy + e);
-            item.layer = 2;
+            item.layer = 3;
         }
         item.key = makeKey(item.row, item.layer, item.far);
         items_.push_back(item);
@@ -951,7 +1007,11 @@ private:
         // Painter's key: the camera looks down its own -z, so -z of the view-space position is the distance.
         const long far = -(kz_[0] * rx + kz_[1] * ry + kz_[2] * rz);
         // A floor's key is recorded BEFORE the exact cull, so what lies on it can still find it.
-        if (set.layer == 1) floorFar_ = far;
+        if (set.layer == 1) {
+            floorFar_ = far;
+            rowPlane_ = curPosY_ + set.floorTop;
+        }
+        if (shadowsOn_ && set.caster) addShadow(set, rot, ax, ay, far, row);
 
         const BHSpriteEntry &entry = sprites_->entries[id];
         const int left = sx - (int)entry.anchorX, top = sy - (int)entry.anchorY;
@@ -981,7 +1041,7 @@ private:
         item.wx = wX;
         item.wy = wY;
         item.stat = set.stat;
-        item.layer = set.layer == 1 ? 0 : (set.layer == 2 || flat) ? 1 : 2;
+        item.layer = set.layer == 1 ? 0 : (set.layer == 2 || flat) ? 1 : 3; // 2 = the shadows, between the two
         if (set.hero && curHero_ >= 0 && heroDead_[curHero_]) {
             // DROWNED. The game sinks the body below the water's surface (WaterRow: getPlayerSunkenPosition) and in
             // 3D the water hides what is under it. A sprite has no water to hide behind, so the whole bird hung
@@ -1016,24 +1076,62 @@ private:
         if (d > 262143L) d = 262143L;
         return (uint32_t(r) << 20) | (uint32_t(layer & 3) << 18) | uint32_t(d);
     }
-    void sortItems(std::vector<Item> &v)
+    __attribute__((noinline)) void sortItems(std::vector<Item> &v)
     {
-        // Insertion sort (no std::sort - see the note at the top of this file about the toolchain's heap-sort
-        // miscompile) over an index array; the items themselves never move.
+        // A STABLE MERGE SORT over an index array, written out by hand (no std::sort - see the note at the top of
+        // this file about the toolchain's heap-sort miscompile). It was an insertion sort, which is quadratic here:
+        // the rows come out of the scene graph in their pools' order, not along the screen, so items travel far.
+        // With the shadows there are ~250 items and that sort was 7 ms a frame. The keys are copied beside the
+        // indices so the inner loop reads no Item. Equal keys keep the walk order, as before.
         const size_t n = v.size();
         order_.resize(n);
-        for (size_t i = 0; i < n; i++) order_[i] = (unsigned short)i;
-        for (size_t i = 1; i < n; i++) {
-            const unsigned short idx = order_[i];
-            const uint32_t key = v[idx].key;
-            size_t j = i;
-            while (j > 0 && v[order_[j - 1]].key > key) {
-                order_[j] = order_[j - 1];
-                j--;
+        sortTmp_.resize(n);
+        sortKey_.resize(n);
+        sortKeyTmp_.resize(n);
+        for (size_t i = 0; i < n; i++) {
+            order_[i] = (unsigned short)i;
+            sortKey_[i] = v[i].key;
+        }
+        if (n < 2) return;
+        // one pass of the merge at a time, in a function of its own: written as one loop nest with swapped pointers
+        // it made gcc 6.5 crash (an internal compiler error) building for the 68060
+        bool inOrder = true; // the sorted run is in order_/sortKey_ (true) or in sortTmp_/sortKeyTmp_
+        for (size_t width = 1; width < n; width *= 2) {
+            if (inOrder) mergePass(&order_[0], &sortKey_[0], &sortTmp_[0], &sortKeyTmp_[0], n, width);
+            else mergePass(&sortTmp_[0], &sortKeyTmp_[0], &order_[0], &sortKey_[0], n, width);
+            inOrder = !inOrder;
+        }
+        if (!inOrder)
+            for (size_t i = 0; i < n; i++) order_[i] = sortTmp_[i];
+    }
+    __attribute__((noinline)) static void mergePass(const unsigned short *src, const uint32_t *ks, unsigned short *dst,
+                                                   uint32_t *kd, size_t n, size_t width)
+    {
+        for (size_t lo = 0; lo < n; lo += 2 * width) {
+            size_t mid = lo + width, hi = lo + 2 * width;
+            if (mid > n) mid = n;
+            if (hi > n) hi = n;
+            size_t i = lo, j = mid, k = lo;
+            while (k < hi) {
+                bool takeRight;
+                if (i >= mid) takeRight = true;
+                else if (j >= hi) takeRight = false;
+                else takeRight = ks[j] < ks[i];
+                if (takeRight) {
+                    dst[k] = src[j];
+                    kd[k] = ks[j];
+                    j++;
+                } else {
+                    dst[k] = src[i];
+                    kd[k] = ks[i];
+                    i++;
+                }
+                k++;
             }
-            order_[j] = idx;
         }
     }
+    std::vector<unsigned short> sortTmp_;
+    std::vector<uint32_t> sortKey_, sortKeyTmp_;
     std::vector<unsigned short> order_;
 
     const BHSprites *sprites_;
@@ -1052,6 +1150,14 @@ private:
     // The ground, drawn before anything standing on it, and the distance to the last floor seen - a lily pad is
     // placed just behind it. Both come straight from the 3D renderer's structure.
     long kx_[3], ky_[3], kz_[3], ox_ = 0, oy_ = 0; // the integer projection - see init()
+    // SIMPLE SHADOWS: on/off, the shade table, the light's shift per unit of height, the planes they fall on
+    bool shadowsOn_ = false, groundOnly_ = false;
+    unsigned char shade_[256];
+    long shV_[2] = {0, 0};
+    long curPosY_ = 0, rowPlane_ = 0, heroPlaneY_[2] = {0, 0}, heroPlaneLocal_[2] = {0, 0};
+    int shadowCount_ = 0;
+    mutable unsigned long shadowRows_ = 0, shadowPx_ = 0;
+    unsigned long shadowItems_ = 0;
     // P3: the world group's offset, the camera inside it (8 fractional bits), the camera's projection (wide, it grows
     // with the distance travelled) and the window's corner in world pixels. See render().
     bool worldCoords_ = false;
@@ -1095,6 +1201,7 @@ private:
     };
     std::vector<SKey> curS_, prevS_;
     std::vector<BgRect> fills_, dyn_;
+    std::vector<unsigned long> tileMask_; // see compose(): three words of moving-thing bits per 32x32 tile
     std::vector<BgRect> tight_; // per sprite: the box of its non-transparent pixels, relative to its top-left
     unsigned long profBgPaint_ = 0, profBgCopy_ = 0, profBgMoving_ = 0, bgPaintedPx_ = 0, bgPieces_ = 0, bgFull_ = 0;
     unsigned long bgFrames_ = 0, bgMoving_ = 0, bgOccl_ = 0;
@@ -1156,18 +1263,287 @@ private:
         return false;
     }
 
-    /* One item, the old way (the sprite's own clip, the drowning hero's line, a quad). */
-    void drawItem(const BHSurface &s, const Item &it) const
+    /* One item, the old way (the sprite's own clip, the drowning hero's line, a quad, a shadow). */
+    void drawItem(const BHSurface &s, const Item &it) const { drawItemAt(s, it, 0, 0); }
+    /* ...moved by (dx, dy): into the cache (world minus the rectangle's corner) or a clip rectangle's own surface. */
+    // noinline: pulled into render(), this made gcc 6.5 crash (an internal compiler error) building for the 68060
+    __attribute__((noinline)) void drawItemAt(const BHSurface &s, const Item &it, int dx, int dy) const
     {
-        if (it.id < 0) {
-            fillQuad(s, it.qx, it.qy, it.colour);
+        if (it.id == -2) {
+            shadowPoly(s, it, dx, dy);
+        } else if (it.id < 0) {
+            short qx[4], qy[4];
+            for (int k = 0; k < 4; k++) {
+                qx[k] = short(it.qx[k] + dx);
+                qy[k] = short(it.qy[k] + dy);
+            }
+            fillQuad(s, qx, qy, it.colour);
         } else if (it.clipY > 0) {
             BHSurface cut = s; // same pixels, shorter: the blitter's own clip does the rest
-            if (it.clipY < cut.height) cut.height = it.clipY;
-            bh_blit_at_anchor(&cut, sprites_, it.id, it.x, it.y);
+            const int line = it.clipY + dy;
+            if (line < cut.height) cut.height = line < 0 ? 0 : line;
+            bh_blit_at_anchor(&cut, sprites_, it.id, it.x + dx, it.y + dy);
         } else {
-            bh_blit_at_anchor(&s, sprites_, it.id, it.x, it.y);
+            bh_blit_at_anchor(&s, sprites_, it.id, it.x + dx, it.y + dy);
         }
+    }
+
+    /* A SHADOW: its convex outline filled row by row, every pixel darkened through the shade table. Two edges walk
+     * down the outline with a fixed-point step each - one division per edge, none per row. Darkening a darkened
+     * pixel changes nothing (the table maps its targets to themselves), so overlapping shadows and a shadow redrawn
+     * over the cache come out exactly as one. */
+    __attribute__((noinline)) void shadowPoly(const BHSurface &s, const Item &it, int dx, int dy) const
+    {
+        const int n = it.np;
+        if (n < 3) return;
+        int xs[8], ys[8], top = 0, bottom = 0;
+        for (int k = 0; k < n; k++) {
+            xs[k] = it.px[k] + dx;
+            ys[k] = it.py[k] + dy;
+            if (ys[k] < ys[top]) top = k;
+            if (ys[k] > ys[bottom]) bottom = k;
+        }
+        const int y0 = ys[top], y1 = ys[bottom];
+        if (y1 <= 0 || y0 >= s.height || y1 <= y0) return;
+        ShadowEdge a, b;
+        if (!shadowEdge(a, xs, ys, n, top, 1) || !shadowEdge(b, xs, ys, n, top, n - 1)) return;
+        const unsigned char *lut = shade_;
+        const int pitch = s.pitch, w = s.width, h = s.height;
+        unsigned long rows = 0, px = 0;
+        for (int y = y0; y < y1; y++) {
+            while (y >= a.yEnd)
+                if (!shadowEdge(a, xs, ys, n, a.end, 1)) return;
+            while (y >= b.yEnd)
+                if (!shadowEdge(b, xs, ys, n, b.end, n - 1)) return;
+            if (y >= 0 && y < h) {
+                long l = a.x < b.x ? a.x : b.x, r = a.x < b.x ? b.x : a.x;
+                int xl = int(l >> 16), xr = int(r >> 16);
+                if (xl < 0) xl = 0;
+                if (xr > w) xr = w;
+                if (xr > xl) {
+                    unsigned char *p = s.pixels + (long)y * pitch + xl;
+                    int m = xr - xl;
+                    px += (unsigned long)m;
+                    while (m >= 4) {
+                        p[0] = lut[p[0]];
+                        p[1] = lut[p[1]];
+                        p[2] = lut[p[2]];
+                        p[3] = lut[p[3]];
+                        p += 4;
+                        m -= 4;
+                    }
+                    while (m-- > 0) {
+                        *p = lut[*p];
+                        p++;
+                    }
+                    rows++;
+                }
+            }
+            a.x += a.dx;
+            b.x += b.dx;
+        }
+        shadowRows_ += rows;
+        shadowPx_ += px;
+    }
+    struct ShadowEdge {
+        int end, yEnd;
+        long x, dx;
+    };
+    /* The next edge of the outline going down from vertex `from` (step +1 or n-1 around it); false at the bottom. */
+    static bool shadowEdge(ShadowEdge &e, const int *xs, const int *ys, int n, int from, int step)
+    {
+        int i = from;
+        for (int guard = 0; guard < n; guard++) {
+            const int j = (i + step) % n;
+            if (ys[j] > ys[i]) {
+                e.end = j;
+                e.yEnd = ys[j];
+                e.dx = (long(xs[j] - xs[i]) << 16) / long(ys[j] - ys[i]);
+                e.x = (long(xs[i]) << 16) + 32768L;
+                return true;
+            }
+            if (ys[j] < ys[i]) return false;
+            i = j; // a flat edge: carry on along it
+        }
+        return false;
+    }
+
+    /* The shadow of a caster whose origin projects to raw (ax, ay): its hull for this direction, moved down onto the
+     * plane it falls on. */
+    void addShadow(const SpriteSet &set, int rot, long ax, long ay, long far, int row)
+    {
+        const int n = set.hullN[rot];
+        if (n < 3) return;
+        const long plane = curHero_ >= 0 ? heroPlaneY_[curHero_] : rowPlane_;
+        const long dy8 = (curPosY_ - plane) >> 8;
+        const long bx = ax + shV_[0] * dy8, by = ay + shV_[1] * dy8;
+        Item sh;
+        int x0 = 32767, x1 = -32768, y0 = 32767, y1 = -32768;
+        // ONE 64-bit step per axis, not one per corner: the origin's whole pixels and the fraction left over, then
+        // each corner in 32 bits. (a + h) >> s == (a >> s) + (((a & mask) + h) >> s), exactly. A 64-bit shift is a
+        // library call on this CPU, and sixteen of them per shadow were most of the collection's extra 10 ms.
+        const long mask = (1L << projShift_) - 1;
+        long baseX, baseY, fracX, fracY;
+        if (worldCoords_) {
+            const long long rx = (long long)bx + ofx_, ry = (long long)by + ofy_;
+            baseX = long(rx >> projShift_) - xw_;
+            baseY = long(ry >> projShift_) - yw_;
+            fracX = long(rx) & mask;
+            fracY = long(ry) & mask;
+        } else {
+            baseX = bx >> projShift_;
+            baseY = by >> projShift_;
+            fracX = bx & mask;
+            fracY = by & mask;
+        }
+        for (int k = 0; k < n; k++) {
+            const int sx = int(baseX + ((fracX + set.hullX[rot][k]) >> projShift_));
+            const int sy = int(baseY + ((fracY + set.hullY[rot][k]) >> projShift_));
+            sh.px[k] = short(sx);
+            sh.py[k] = short(sy);
+            if (sx < x0) x0 = sx;
+            if (sx > x1) x1 = sx;
+            if (sy < y0) y0 = sy;
+            if (sy > y1) y1 = sy;
+        }
+        const int pad = worldCoords_ ? (kBgMargin + kBgStep) * gPixelScale : 0;
+        if (x0 >= viewW_ + pad || y0 >= viewH_ + pad || x1 <= -pad || y1 <= -pad) return;
+        sh.np = (unsigned char)n;
+        sh.id = -2;
+        sh.far = int32_t(far);
+        sh.x = sh.px[0];
+        sh.y = sh.py[0];
+        sh.row = short(row);
+        sh.colour = curHero_ >= 0 ? 1 : 0; // a hero's shadow: see compose()
+        sh.clipY = 0;
+        sh.wx = worldCoords_ ? baseX + xw_ : 0;
+        sh.wy = worldCoords_ ? baseY + yw_ : 0;
+        sh.stat = set.stat;
+        sh.layer = 2;
+        sh.key = makeKey(sh.row, sh.layer, sh.far);
+        items_.push_back(sh);
+        shadowItems_++;
+    }
+
+    /* Once per sprite set: the shade table and every caster's flattened outlines. */
+    void buildShadows()
+    {
+        // THE SHADE TABLE. EHB (64 pens): the chipset's own half-brite, pen N + 32. 256 colours: the nearest colour
+        // to 0.841 of each (the consoles' factor), taking the set's shadow twin where one was packed; then every
+        // colour chosen as a target maps to itself, so darkening twice is darkening once.
+        const int entries = sprites_->paletteEntries;
+        const unsigned char *pal = sprites_->palette;
+        groundOnly_ = false;
+        if (entries <= 64) {
+            for (int i = 0; i < 256; i++) shade_[i] = (unsigned char)(i < 32 ? i + 32 : i);
+        } else {
+            // ONLY THE GROUND DARKENS. The packer gave a twin to every colour of the floors, the logs and the lily
+            // pads; those map to their twin and every other colour - a tree, a car, the beaver - to itself. So a
+            // shadow can be laid down in any order against what stands on the ground: over a tree or a car it
+            // changes nothing. That is what lets the background cache skip redrawing trees over moving shadows,
+            // and the moving things over the trees' shadows - measured, that redrawing was the whole cost.
+            // A set packed before the twins darkens every colour to its nearest (and gets no such shortcut).
+            const int twin = sprites_->shadeFirst > 0 ? sprites_->shadeFirst : 0;
+            groundOnly_ = twin > 0;
+            for (int i = 0; i < 256; i++) {
+                shade_[i] = (unsigned char)i;
+                if (i < 1 || i >= entries || (twin > 0 && i >= twin)) continue;
+                const long r = (long(pal[i * 3]) * 841L + 500L) / 1000L, g = (long(pal[i * 3 + 1]) * 841L + 500L) / 1000L,
+                           b = (long(pal[i * 3 + 2]) * 841L + 500L) / 1000L;
+                if (twin > 0) {
+                    for (int j = twin; j < entries; j++)
+                        if (pal[j * 3] == r && pal[j * 3 + 1] == g && pal[j * 3 + 2] == b) {
+                            shade_[i] = (unsigned char)j;
+                            break;
+                        }
+                    continue;
+                }
+                long best = 0x7fffffffL;
+                int bi = i;
+                for (int j = 20; j < entries; j++) {
+                    const long dr = r - pal[j * 3], dg = g - pal[j * 3 + 1], db = b - pal[j * 3 + 2];
+                    const long d = dr * dr + dg * dg + db * db;
+                    if (d < best) {
+                        best = d;
+                        bi = j;
+                    }
+                }
+                shade_[i] = (unsigned char)bi;
+            }
+            bool target[256];
+            for (int i = 0; i < 256; i++) target[i] = false;
+            for (int i = 0; i < 256; i++)
+                if (shade_[i] != i) target[shade_[i]] = true;
+            for (int i = 0; i < 256; i++)
+                if (target[i]) shade_[i] = (unsigned char)i;
+        }
+        // THE LIGHT, as the consoles have it (settings.h lightX/Y/Z): a point at height y above the plane lands
+        // (y * lx/ly, y * lz/ly) away from where it stands. shV_ is how far the origin's picture moves for each unit
+        // of height, in the projection's raw units per 1/256 unit.
+        const real kl = settings::lightX / settings::lightY, kzl = settings::lightZ / settings::lightY;
+        shV_[0] = -(long(((long long)kx_[0] * kl.v) >> 16) + kx_[1] + long(((long long)kx_[2] * kzl.v) >> 16));
+        shV_[1] = -(long(((long long)ky_[0] * kl.v) >> 16) + ky_[1] + long(((long long)ky_[2] * kzl.v) >> 16));
+        int casters = 0;
+        for (std::map<const Model *, SpriteSet>::iterator it = sets_.begin(); it != sets_.end(); ++it) {
+            SpriteSet &set = it->second;
+            if (!set.caster) continue;
+            casters++;
+            const Model &m = *it->first;
+            const int count = set.rotCount > 0 ? int(set.rotCount) : 1;
+            for (int k = 0; k < count && k < BH_ROT_MAX; k++) {
+                const Mat4 &basis = rotBasis_[k * (BH_ROT_MAX / count)];
+                long hx[8], hy[8];
+                for (int c = 0; c < 8; c++) {
+                    const real lx = (c & 1) ? m.aabbMax.x : m.aabbMin.x, ly = (c & 2) ? m.aabbMax.y : m.aabbMin.y,
+                               lz = (c & 4) ? m.aabbMax.z : m.aabbMin.z;
+                    const real wx = basis.e[0] * lx + basis.e[8] * lz, wz = basis.e[2] * lx + basis.e[10] * lz;
+                    const long fx = long((wx - kl * ly).v) >> 8, fz = long((wz - kzl * ly).v) >> 8;
+                    hx[c] = kx_[0] * fx + kx_[2] * fz;
+                    hy[c] = ky_[0] * fx + ky_[2] * fz;
+                }
+                set.hullN[k] = (unsigned char)convexHull(hx, hy, 8, set.hullX[k], set.hullY[k]);
+            }
+        }
+        printf("shadows: %d models cast one; shade table from %s\n", casters,
+               entries <= 64 ? "the half-brite pens" : sprites_->shadeFirst > 0 ? "the packed twins" : "the nearest colours");
+    }
+    static long long hullCross(const long *xs, const long *ys, int o, int a, int b)
+    {
+        return (long long)(xs[a] - xs[o]) * (ys[b] - ys[o]) - (long long)(ys[a] - ys[o]) * (xs[b] - xs[o]);
+    }
+    /* Andrew's monotone chain on at most eight points; the outline comes back in order, without repeats. */
+    static int convexHull(const long *xs, const long *ys, int n, long *ox, long *oy)
+    {
+        int idx[8];
+        for (int i = 0; i < n; i++) idx[i] = i;
+        for (int i = 1; i < n; i++) { // insertion sort by x, then y
+            const int v = idx[i];
+            int j = i;
+            while (j > 0 && (xs[idx[j - 1]] > xs[v] || (xs[idx[j - 1]] == xs[v] && ys[idx[j - 1]] > ys[v]))) {
+                idx[j] = idx[j - 1];
+                j--;
+            }
+            idx[j] = v;
+        }
+        int hull[17], k = 0;
+        for (int t = 0; t < n; t++) { // lower chain
+            const int i = idx[t];
+            while (k >= 2 && hullCross(xs, ys, hull[k - 2], hull[k - 1], i) <= 0) k--;
+            hull[k++] = i;
+        }
+        const int lo = k + 1;
+        for (int t = n - 2; t >= 0; t--) { // upper chain
+            const int i = idx[t];
+            while (k >= lo && hullCross(xs, ys, hull[k - 2], hull[k - 1], i) <= 0) k--;
+            hull[k++] = i;
+        }
+        k--; // the last point is the first one again
+        if (k > 8) k = 8;
+        for (int i = 0; i < k; i++) {
+            ox[i] = xs[hull[i]];
+            oy[i] = ys[hull[i]];
+        }
+        return k;
     }
 
     /* Where an item can put pixels, on screen: the tight box of its sprite, or the box of its quad. */
@@ -1182,6 +1558,18 @@ private:
             r.w = t.w;
             r.h = t.h;
             if (it.clipY > 0 && r.y + r.h > it.clipY) r.h = int(it.clipY - r.y);
+        } else if (it.id == -2) {
+            long x0 = it.px[0], x1 = it.px[0], y0 = it.py[0], y1 = it.py[0];
+            for (int k = 1; k < it.np; k++) {
+                if (it.px[k] < x0) x0 = it.px[k];
+                if (it.px[k] > x1) x1 = it.px[k];
+                if (it.py[k] < y0) y0 = it.py[k];
+                if (it.py[k] > y1) y1 = it.py[k];
+            }
+            r.x = x0;
+            r.y = y0;
+            r.w = int(x1 - x0 + 1);
+            r.h = int(y1 - y0 + 1);
         } else {
             long x0 = it.qx[0], x1 = it.qx[0], y0 = it.qy[0], y1 = it.qy[0];
             for (int k = 1; k < 4; k++) {
@@ -1219,16 +1607,7 @@ private:
         for (size_t i = 0; i < order_.size(); i++) {
             const Item &it = items_[order_[i]];
             if (!it.stat) continue;
-            if (it.id < 0) {
-                short qx[4], qy[4];
-                for (int k = 0; k < 4; k++) {
-                    qx[k] = short(it.qx[k] + xw_ - rx0);
-                    qy[k] = short(it.qy[k] + yw_ - ry0);
-                }
-                fillQuad(dst, qx, qy, it.colour);
-            } else {
-                bh_blit_at_anchor(&dst, sprites_, it.id, int(it.wx - rx0), int(it.wy - ry0));
-            }
+            drawItemAt(dst, it, int(xw_ - rx0), int(yw_ - ry0));
         }
     }
 
@@ -1301,7 +1680,7 @@ private:
             k.r = screenBox(it);
             k.r.x += xw_;
             k.r.y += yw_;
-            k.id = it.id >= 0 ? long(it.id) : -1L - long(it.colour);
+            k.id = it.id >= 0 ? long(it.id) : it.id == -2 ? -5000L : -1L - long(it.colour);
             k.wx = it.wx;
             k.wy = it.wy;
             curS_.push_back(k);
@@ -1361,7 +1740,7 @@ private:
         for (; j < p; j++) invalidate(prevS_[j].r);
     }
 
-    void compose(BHSurface &surface)
+    __attribute__((noinline)) void compose(BHSurface &surface)
     {
         const unsigned long tA = profMicros();
         const int W = surface.width, H = surface.height;
@@ -1437,6 +1816,13 @@ private:
         // 2. and 3. what moves, and the background that comes after it in the painter's order, clipped to it
         dyn_.clear();
         long ux0 = 0x7fffffffL, uy0 = 0x7fffffffL, ux1 = -0x7fffffffL, uy1 = -0x7fffffffL;
+        // WHICH MOVING THINGS ARE WHERE: the screen in 32x32 tiles, each with a bit per moving thing (the first 96)
+        // that reaches into it. A background item then tests only the moving things in its own tiles - with the
+        // shadows there are a hundred or more background items and fifty or more moving ones, and testing every
+        // pair was most of the frame's drawing time.
+        const int tcols = (W + 31) >> 5, trows = (H + 31) >> 5;
+        tileMask_.assign((size_t)tcols * (size_t)trows * 3, 0UL);
+        bool tileOverflow = false;
         BgRect screen;
         screen.x = 0;
         screen.y = 0;
@@ -1449,8 +1835,21 @@ private:
                 drawItem(surface, it);
                 bgMoving_++;
                 BgRect b;
+                // a moving shadow that darkens only the ground needs nothing redrawn over it (the hero's excepted:
+                // mid-hop it lies across two rows, and the nearer row's floor must still cover its far half)
+                if (it.id == -2 && groundOnly_ && !it.colour) continue;
                 if (intersect(screenBox(it), screen, b)) {
+                    const size_t d = dyn_.size();
                     dyn_.push_back(b);
+                    if (d < 96) {
+                        const unsigned long bit = 1UL << (d & 31);
+                        const int word = int(d >> 5);
+                        for (long ty = b.y >> 5; ty <= (b.y + b.h - 1) >> 5; ty++)
+                            for (long tx = b.x >> 5; tx <= (b.x + b.w - 1) >> 5; tx++)
+                                tileMask_[(size_t)(ty * tcols + tx) * 3 + word] |= bit;
+                    } else {
+                        tileOverflow = true;
+                    }
                     if (b.x < ux0) ux0 = b.x;
                     if (b.y < uy0) uy0 = b.y;
                     if (b.x + b.w > ux1) ux1 = b.x + b.w;
@@ -1459,10 +1858,30 @@ private:
                 continue;
             }
             if (dyn_.empty()) continue;
+            if (it.id == -2 && groundOnly_) continue; // it cannot change a pixel of anything that moves
             const BgRect sb = screenBox(it);
             // the box round everything that moved so far turns most of the background away in four compares
             if (sb.x >= ux1 || sb.y >= uy1 || sb.x + sb.w <= ux0 || sb.y + sb.h <= uy0) continue;
+            BgRect sv;
+            if (!intersect(sb, screen, sv)) continue;
+            unsigned long m[3] = {0, 0, 0};
+            for (long ty = sv.y >> 5; ty <= (sv.y + sv.h - 1) >> 5; ty++)
+                for (long tx = sv.x >> 5; tx <= (sv.x + sv.w - 1) >> 5; tx++) {
+                    const unsigned long *t = &tileMask_[(size_t)(ty * tcols + tx) * 3];
+                    m[0] |= t[0];
+                    m[1] |= t[1];
+                    m[2] |= t[2];
+                }
+            if (!m[0] && !m[1] && !m[2] && !tileOverflow) continue;
             for (size_t d = 0; d < dyn_.size(); d++) {
+                if (d < 96) {
+                    const unsigned long word = m[d >> 5];
+                    if (!word) {
+                        d |= 31; // nothing in this word: on to the next one
+                        continue;
+                    }
+                    if (!(word & (1UL << (d & 31)))) continue;
+                }
                 const BgRect &q = dyn_[d];
                 if (sb.x >= q.x + q.w || sb.y >= q.y + q.h || sb.x + sb.w <= q.x || sb.y + sb.h <= q.y) continue;
                 BgRect c;
@@ -1480,16 +1899,7 @@ private:
                 sub.pitch = surface.pitch;
                 sub.width = c.w;
                 sub.height = c.h;
-                if (it.id < 0) {
-                    short qx[4], qy[4];
-                    for (int k = 0; k < 4; k++) {
-                        qx[k] = short(it.qx[k] - c.x);
-                        qy[k] = short(it.qy[k] - c.y);
-                    }
-                    fillQuad(sub, qx, qy, it.colour);
-                } else {
-                    bh_blit_at_anchor(&sub, sprites_, it.id, int(it.x - c.x), int(it.y - c.y));
-                }
+                drawItemAt(sub, it, int(-c.x), int(-c.y));
                 bgOccl_++;
             }
         }
@@ -1678,7 +2088,9 @@ struct Session {
     {
         loadConf();
         settings.volume = clampInt(getInt("volume", 10), 0, 10);
-        settings.shadows = clampInt(getInt("shadows", 0), 0, 2);
+        // THE AMIGA'S SHADOWS have a key of their own, off unless chosen: a config written by an older version
+        // says shadows=0, which on the consoles means FULL and here would switch them on for everyone who updates.
+        settings.shadows = getInt("amiga_shadows", 0) ? 1 : 2;
         settings.fpsCounter = getInt("fps_counter", 1) != 0; // ON until the port is accepted: the user watches it
         settings.framing = clampInt(getInt("framing", 0), 0, 1);
         settings.language = clampInt(getInt("language", 0), 0, 1);
@@ -1705,7 +2117,7 @@ struct Session {
     void saveSettings()
     {
         setInt("volume", settings.volume);
-        setInt("shadows", settings.shadows);
+        setInt("amiga_shadows", settings.shadows != 2 ? 1 : 0);
         setInt("fps_counter", settings.fpsCounter ? 1 : 0);
         setInt("framing", settings.framing);
         setInt("language", settings.language);
@@ -1838,7 +2250,9 @@ struct Session {
             }
         }
         if (g.state() != GameState::GameOver) goArmA = goArmMenu = false;
-        if (!screens.pausesGame()) {
+        // THE MENUS FREEZE EVERYTHING on the Amiga, the settings opened from the title too: no logic step while one
+        // is open, and main() draws neither the scene nor the HUD under it (the window is solid)
+        if (!screens.pausesGame() && screens.menu() == Menu::None) {
             g.step();
             g.endFrame();
         }
@@ -2311,7 +2725,7 @@ int main(void)
     //   ab     switch between the two at every profile report, so both are measured on the same machine at the
     //          same host load (this emulator drifts +-30% with what else the PC is doing)
     //   check  compare the cached picture with the old painter every 25th frame; must be 0 pixels
-    bool bgAB = false, bgCheck = false;
+    bool bgAB = false, bgCheck = false, shadowAB = false, shadowPhase = true;
     {
         bool on = true;
         FILE *f = fopen("PROGDIR:bgcache.txt", "r");
@@ -2321,6 +2735,7 @@ int main(void)
                 if (!strcmp(word, "off")) on = false;
                 if (!strcmp(word, "ab")) bgAB = true;
                 if (!strcmp(word, "check")) bgCheck = true;
+                if (!strcmp(word, "shadowab")) shadowAB = true; // shadows on and off at every report
             }
             fclose(f);
         }
@@ -2355,6 +2770,11 @@ int main(void)
     session.screens.controlNames = Session::controlNames();
     session.screens.viewShapes = session.shapesAllowed;
     session.screens.homeSettings = true; // a third bar on the title: SETTINGS
+    session.screens.simpleShadowsOnly = true; // the Amiga's shadows are the simple ones: SIMPLE or OFF
+    // the menus are a solid window over the frozen game, 10 lines of it left visible above and 4 below
+    session.screens.solidMenus = true;
+    session.screens.menuGapTop = 10 * 2 / gPixelScale;
+    session.screens.menuGapBottom = 4 * 2 / gPixelScale;
     session.screens.controlCount = Session::kControlCount;
     game.setHighscore(session.getInt("highscore", 0));
     game.setCharacter(kCharacters[session.settings.character].id);
@@ -2423,7 +2843,7 @@ int main(void)
     AutoPlay autoplay;
     {
         FILE *f = fopen("PROGDIR:profile.txt", "r");
-        gProfiling = autoplay.on || compare.on || f != 0;
+        gProfiling = autoplay.on || autoplay.menuWalk || autoplay.viewWalk || compare.on || f != 0;
         if (f) fclose(f);
     }
     if (gProfiling && bh_clock_open()) game.profileClock = &Micros::now;
@@ -2916,8 +3336,12 @@ int main(void)
             renderer.forceClear();
             needRedraw = false;
         }
-        renderer.render(view, game);
-        if (bgCheck && frames % 25 == 0) renderer.checkFrame(view);
+        renderer.setShadows(shadowAB ? shadowPhase : session.settings.shadows != 2); // FULL (0) reads as SIMPLE here
+        // A MENU IS OPEN: the game is frozen and the menu is a solid window, so the scene is not drawn at all - the
+        // chunky buffer still holds the last frame, and the strips above and below the window show it
+        const bool menuOpen = session.screens.menu() != Menu::None;
+        if (!menuOpen) renderer.render(view, game);
+        if (bgCheck && !menuOpen && frames % 25 == 0) renderer.checkFrame(view);
         // A NARROW FRAME: the scene alone, in play - the HUD goes into the scene's column and only that column is
         // converted. Anything else (title, menus, game over, the restart fade) is a whole-screen frame, with the
         // sides painted black first so nothing a menu left there survives it.
@@ -2942,8 +3366,10 @@ int main(void)
                     session.screens.versionLabel = std::string("ESC ") + lang::t(lang::Exit);
                 }
             }
-            session.screens.drawSceneFade(ui, uiW, uiH);
-            drawHud(ui, text, game, uiW, uiH);
+            if (!menuOpen) {
+                session.screens.drawSceneFade(ui, uiW, uiH);
+                drawHud(ui, text, game, uiW, uiH);
+            }
             session.screens.draw(ui, text, game, uiW, uiH);
         }
         ui.surface = &surface;
@@ -3100,6 +3526,7 @@ int main(void)
             if (renderer.checks_)
                 printf("bgcache: %lu self-checks so far, %lu of them differed\n", renderer.checks_, renderer.checksBad_);
             if (bgAB) renderer.setBgCache(!renderer.bgCache());
+            if (shadowAB) shadowPhase = !shadowPhase;
             {
                 const Game::StepProfile &sp = game.stepProfile;
                 const unsigned long n = ran - profRan0 ? ran - profRan0 : 1UL;

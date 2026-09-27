@@ -187,7 +187,10 @@ struct CachedLine {
 };
 std::vector<CachedLine> gLines;
 unsigned long gLineClock = 0;
-const size_t kMaxLines = 16;
+// 48, not 16: the settings screen alone shows about twenty lines (two per row, the title, the hint, the back box),
+// so sixteen made every line push another out and the whole screen was re-rendered, five passes a line, every
+// frame - measured, 57 ms of a menu frame.
+const size_t kMaxLines = 48;
 } // namespace
 
 void TextRenderer::drawOutlined(Renderer &renderer, const std::string &raw, int x, int y, int size, Rgba color,

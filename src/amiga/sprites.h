@@ -49,6 +49,7 @@ typedef struct {
     unsigned long bytes;
     int count;
     int paletteEntries;
+    int shadeFirst;             /* first of the shadow twins in the palette (0 = none) - see pack_amiga_sprites.py */
     const unsigned char *palette;   /* 768 bytes, RGB triples */
     const BHSpriteEntry *entries;   /* count of them, big-endian as loaded */
 } BHSprites;

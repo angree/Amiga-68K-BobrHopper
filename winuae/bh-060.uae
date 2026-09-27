@@ -89,3 +89,5 @@ sound_filter=emulated
 sound_stereo_separation=10
 win32.minimized_pause=false
 win32.inactive_pause=false
+win32.iconified_pause=false
+win32.iconified_nosound=false

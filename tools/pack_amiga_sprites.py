@@ -280,6 +280,16 @@ def build_ehb_palette(counts, reserved, rounds=24):
 
 FLOOR_NAMES = ("grass_0", "grass_1", "road_0", "road_1", "river", "railroad")
 
+# SHADOW TWINS (256-colour sets only). The Amiga draws the simple shadows by darkening what is already on screen
+# through a table: pixel = shade[pixel]. For that to look right, every colour a shadow falls on - the floors, the
+# logs, the lily pads - needs a darker copy of itself in the palette, at the same factor the console ports multiply
+# their framebuffer by (src/game/scene_render.cpp shadowFactorForTopFaces: (1.8 / 2.632) ^ (1 / 2.2) = 0.841).
+# The twins go AFTER the art and no art pixel ever uses them, so darkening a darkened pixel changes nothing - two
+# shadows that overlap do not come out darker. The header's fourth word says where they start (0 = none).
+# EHB sets need none: the chipset's half-brite IS a shadow table, pen N + 32 at half the brightness.
+SHADE = 0.841
+SHADE_PREFIXES = FLOOR_NAMES + ("log_", "lily_pad")
+
 
 def seal_floor_edge(img, e, grow=1):
     """THE DASHED DARK LINES BETWEEN ROWS, which the user reported seven times before I looked at the sprite.
@@ -334,6 +344,7 @@ def main():
     # Pass 1: every opaque colour in every sprite, by how many pixels use it.
     images, counts = [], Counter()
     log_counts = Counter()  # the logs' own, so their two tones can be split where their own shading splits
+    shade_counts = Counter()  # colours shadows fall on (SHADE_PREFIXES)
     for e in entries:
         path = sprite_file(args.indir, e)
         img = Image.open(path).convert("RGBA")
@@ -350,6 +361,8 @@ def main():
                     counts[(r, g, b)] += 1
                     if e["name"].startswith(LOG_PREFIX):
                         log_counts[(r, g, b)] += 1
+                    if e["name"].startswith(SHADE_PREFIXES):
+                        shade_counts[(r, g, b)] += 1
 
     # Index 0 is the transparent key and is never drawn. Index 1 is the SKY: the game clears the screen to it
     # before anything else, and no sprite contains it (sprites are cropped to the model), so it would otherwise be
@@ -446,6 +459,25 @@ def main():
                 data[row + x] = i
         blobs.append(bytes(data))
 
+    # The shadow twins, after the art, in the room that is left - most used first.
+    twin_first = 0
+    if not args.ehb:
+        twins = []
+        for c, _ in shade_counts.most_common():
+            i = index_of.get(c)
+            if i is None:
+                continue  # merged away: its pixels use a neighbour's index, which gets its own twin
+            t = tuple(int(round(v * SHADE)) for v in palette[i])
+            if t not in twins:
+                twins.append(t)
+        room = MAX_COLORS - len(palette)
+        if twins and room > 0:
+            twin_first = len(palette)
+            palette.extend(twins[:room])
+        print("shadow twins: %d floor colours, %d twins from index %d%s" % (
+            len(shade_counts), min(len(twins), max(room, 0)), twin_first,
+            "" if len(twins) <= room else "  (%d had no room - they shade to their nearest)" % (len(twins) - room)))
+
     os.makedirs(args.outdir, exist_ok=True)
     header_size = 12 + 768
     table_size = 12 * len(entries)
@@ -453,7 +485,7 @@ def main():
 
     out = bytearray()
     out += MAGIC
-    out += struct.pack(">HHHH", VERSION, len(entries), len(palette), 0)
+    out += struct.pack(">HHHH", VERSION, len(entries), len(palette), twin_first)
     pal = bytearray(768)
     for i, (r, g, b) in enumerate(palette):
         pal[i * 3:i * 3 + 3] = bytes((r, g, b))

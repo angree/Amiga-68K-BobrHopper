@@ -81,6 +81,7 @@ int bh_sprites_load(BHSprites *s, const char *path)
     }
     s->count = (int)be16(s->data + 6);
     s->paletteEntries = (int)be16(s->data + 8);
+    s->shadeFirst = (int)be16(s->data + 10); /* 0 in a file packed before the shadows */
     s->palette = s->data + BH_HEADER_BYTES;
     /* The table is 12-byte aligned and big-endian, so it is used where it lies - no parsing pass. */
     s->entries = (const BHSpriteEntry *)(s->data + BH_TABLE_OFFSET);

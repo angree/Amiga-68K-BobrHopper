@@ -204,7 +204,10 @@ bool Screens::handleInput(const Input &in, UserSettings &s, MenuResult &out)
         s.music = v;
         break;
     }
-    case SetShadows: s.shadows = (s.shadows + dir + 3) % 3; break;
+    case SetShadows:
+        if (simpleShadowsOnly) s.shadows = s.shadows == 2 ? 1 : 2;
+        else s.shadows = (s.shadows + dir + 3) % 3;
+        break;
     case SetFps: s.fpsCounter = !s.fpsCounter; break;
     case SetView: s.framing = 1 - s.framing; break;
     case SetShape: s.shape = (s.shape + dir + 3) % 3; break;
@@ -294,8 +297,10 @@ void Screens::update(const Game &game)
 void Screens::draw(Renderer &renderer, TextRenderer &text, const Game &game, int screenW, int screenH)
 {
     renderer.beginOverlay(screenW, screenH);
-    if (game.state() == GameState::None) drawHome(renderer, text, screenW, screenH);
-    if (game.state() == GameState::GameOver) drawGameOver(renderer, text, game, screenW, screenH);
+    // a solid menu window hides what is under it: the title and the game-over screen are not drawn at all
+    const bool covered = solidMenus && (menu_ == Menu::Pause || menu_ == Menu::Settings);
+    if (!covered && game.state() == GameState::None) drawHome(renderer, text, screenW, screenH);
+    if (!covered && game.state() == GameState::GameOver) drawGameOver(renderer, text, game, screenW, screenH);
     if (menu_ == Menu::Pause) drawPause(renderer, text, screenW, screenH);
     if (menu_ == Menu::Settings) drawSettings(renderer, text, screenW, screenH);
     renderer.endOverlay();
@@ -338,9 +343,19 @@ static void menuBackground(Renderer &renderer, int w, int h)
     renderer.drawOverlayRect(0, 0, mreal(w), mreal(h), 105 / 255.0f, 201 / 255.0f, 230 / 255.0f, 0.8f);
 }
 
+void Screens::menuWindow(Renderer &renderer, int w, int h)
+{
+    if (!solidMenus) {
+        menuBackground(renderer, w, h);
+        return;
+    }
+    renderer.drawOverlayRect(0, mreal(menuGapTop), mreal(w), mreal(h - menuGapTop - menuGapBottom), 105 / 255.0f,
+                             201 / 255.0f, 230 / 255.0f, 1);
+}
+
 void Screens::drawPause(Renderer &renderer, TextRenderer &text, int w, int h)
 {
-    menuBackground(renderer, w, h);
+    menuWindow(renderer, w, h);
     centred(renderer, text, lang::t(lang::Paused), w, 96, 32, kWhite, 3);
     const lang::Str items[4] = {lang::Resume, lang::Settings, lang::MenuItem, lang::Exit};
     for (int i = 0; i < 4; i++) {
@@ -423,7 +438,9 @@ std::string Screens::settingsValue(SettingsItem item, const UserSettings &s) con
     case SetShape: return lang::t(s.shape == 1 ? lang::ShapeNarrow : s.shape == 2 ? lang::ShapePhone : lang::ShapeFull);
     case SetLanguage: return s.language ? "POLSKI" : "ENGLISH";
     case SetCharacter: return kCharacters[std::max(0, std::min(kCharacterCount - 1, s.character))].name;
-    case SetShadows: return lang::t(shadowNames[std::max(0, std::min(2, s.shadows))]);
+    case SetShadows:
+        if (simpleShadowsOnly) return lang::t(s.shadows == 2 ? lang::Off : lang::Simple);
+        return lang::t(shadowNames[std::max(0, std::min(2, s.shadows))]);
     case SetFps: return lang::t(s.fpsCounter ? lang::On : lang::Off);
     default: return std::string();
     }
@@ -443,10 +460,11 @@ void Screens::drawSettings(Renderer &renderer, TextRenderer &text, int w, int h)
 {
     static const UserSettings defaults;
     const UserSettings &s = settings ? *settings : defaults;
-    menuBackground(renderer, w, h);
-    // SettingsScreen: back button (60x48 image box, contain) top-left
-    renderer.drawOverlayImage(buttonBack_, 14, 8, 48, 48);
-    text.drawOutlined(renderer, "B", 14 + (48 - text.width("B", 12)) / 2, 60, 12, kWhite, 2, kBlack);
+    menuWindow(renderer, w, h);
+    // SettingsScreen: back button (60x48 image box, contain) top-left - inside the window when it is one
+    const int backY = solidMenus ? menuGapTop + 6 : 8;
+    renderer.drawOverlayImage(buttonBack_, 14, mreal(backY), 48, 48);
+    text.drawOutlined(renderer, "B", 14 + (48 - text.width("B", 12)) / 2, backY + 52, 12, kWhite, 2, kBlack);
     centred(renderer, text, lang::t(lang::Settings), w, 40, 32, kWhite, 3);
 
     SettingsItem items[SetItemCount];
