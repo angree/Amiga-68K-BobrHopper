@@ -199,7 +199,7 @@ bool Screens::handleInput(const Input &in, UserSettings &s, MenuResult &out)
         break;
     }
     case SetMusic: {
-        const int v = std::max(0, std::min(100, s.music + 2 * dir));
+        const int v = std::max(0, std::min(10, s.music + dir));
         changed = v != s.music;
         s.music = v;
         break;
@@ -212,8 +212,8 @@ bool Screens::handleInput(const Input &in, UserSettings &s, MenuResult &out)
     case SetView: s.framing = 1 - s.framing; break;
     case SetShape: s.shape = (s.shape + dir + 3) % 3; break;
     // O11.5: the language of the whole UI, in place of the battery saver the user asked to drop
-    case SetLanguage:
-        s.language = 1 - s.language;
+    case SetLanguage: // English, Polish, Spanish, Latin, round
+        s.language = (s.language + dir + lang::kLanguages) % lang::kLanguages;
         lang::set(s.language);
         break;
     case SetCharacter: s.character = (s.character + dir + kCharacterCount) % kCharacterCount; break;
@@ -436,8 +436,19 @@ std::string Screens::settingsValue(SettingsItem item, const UserSettings &s) con
     case SetMusic: return toString(s.music);
     case SetView: return lang::t(s.framing ? lang::Wide : lang::Normal);
     case SetShape: return lang::t(s.shape == 1 ? lang::ShapeNarrow : s.shape == 2 ? lang::ShapePhone : lang::ShapeFull);
-    case SetLanguage: return s.language ? "POLSKI" : "ENGLISH";
-    case SetCharacter: return kCharacters[std::max(0, std::min(kCharacterCount - 1, s.character))].name;
+    case SetLanguage: {
+        static const char *const names[lang::kLanguages] = {"ENGLISH", "POLSKI", "ESPAÑOL", "LATINA"};
+        return names[std::max(0, std::min(lang::kLanguages - 1, s.language))];
+    }
+    case SetCharacter: {
+        // the characters that are animals or food have a name in every language; the rest are people's names
+        const CharacterInfo &c = kCharacters[std::max(0, std::min(kCharacterCount - 1, s.character))];
+        const std::string id = c.id;
+        if (id == "beaver") return lang::t(lang::CharBeaver);
+        if (id == "chicken") return lang::t(lang::CharChicken);
+        if (id == "bacon") return lang::t(lang::CharBacon);
+        return c.name;
+    }
     case SetShadows:
         if (simpleShadowsOnly) return lang::t(s.shadows == 2 ? lang::Off : lang::Simple);
         return lang::t(shadowNames[std::max(0, std::min(2, s.shadows))]);

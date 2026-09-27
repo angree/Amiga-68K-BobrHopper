@@ -103,6 +103,19 @@ esac
 case "$WHICH" in
 hphonewide|all)  bake_one hphonewide  7     2048 768 sprites640n320wide.spr 2 344 ;;
 esac
+# ...and the two narrow views in EHB, for OCS/ECS (their own 64-pen palettes, like ocs/ocswide).
+case "$WHICH" in
+ocsnarrow|all)     bake_one ocsnarrow     7.5  1024 384 spritesocsn256.spr     1 172 1 ;;
+esac
+case "$WHICH" in
+ocsnarrowwide|all) bake_one ocsnarrowwide 8.75 1024 384 spritesocsn256wide.spr 1 172 1 ;;
+esac
+case "$WHICH" in
+ocsphone|all)      bake_one ocsphone      12   1024 384 spritesocsn160.spr     1 172 1 ;;
+esac
+case "$WHICH" in
+ocsphonewide|all)  bake_one ocsphonewide  14   1024 384 spritesocsn160wide.spr 1 172 1 ;;
+esac
 first=""
 for h in out/check/amiga/ids/*.h; do
     case "$h" in *ui_colours.h) continue ;; esac

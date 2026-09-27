@@ -101,7 +101,7 @@ done
 # The SCREEN shapes (the game's settings: NARROW, PHONE): the scene in a narrower column, zoomed out, each with its
 # own sets - normal and wide, 320x240 and 640x480. Loaded one at a time, like every other set.
 for w in spritesn256.spr spritesn256wide.spr spritesn160.spr spritesn160wide.spr \
-         sprites640n512.spr sprites640n512wide.spr sprites640n320.spr sprites640n320wide.spr; do
+         sprites640n512.spr sprites640n512wide.spr sprites640n320.spr sprites640n320wide.spr          spritesocsn256.spr spritesocsn256wide.spr spritesocsn160.spr spritesocsn160wide.spr; do
     [ -f "$REPO/data_amiga/$w" ] || { echo "no data_amiga/$w - run sh build/bake_amiga.sh"; exit 1; }
     cp "$REPO/data_amiga/$w" "$STAGE/data/"
 done
@@ -154,13 +154,17 @@ SCREEN SHAPE (in the game's settings)
   PHONE    a tall column half the width, zoomed out twice - you see twice as many
            rows ahead. A different way to play
   Each shape has its own graphics, loaded on the title screen (LOADING for a
-  moment) - only one set is ever in memory. AGA and RTG, 320x240 and 640x480;
-  not in the OCS/ECS mode.
+  moment) - only one set is ever in memory. AGA, RTG and OCS/ECS, 320x240 and
+  640x480.
 
 SHADOWS (in the game's settings: SIMPLE or OFF, OFF to begin with)
   Everything that casts a shadow on the consoles casts one here: trees, rocks,
   cars, trains, logs, the beaver. They cost some speed - about a fifth of the
   frame rate on the test machine - so they start switched off.
+
+LANGUAGES
+  English, Polish, Spanish - and Latin, for fun. Settings -> LANGUAGE.
+  Sound effects and music both go 0-10 (music starts at 2).
 
 MENUS
   The pause menu and the settings are a window over the frozen game: nothing

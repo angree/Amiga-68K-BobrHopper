@@ -52,7 +52,10 @@ struct Glyph {
 // O11.6: the baked font (tools/bake_font.py) has ASCII and the Polish letters. A Unicode code point's slot in
 // FontData::glyphs: ASCII as itself, the Polish letters after it (in kPolishLetters' order), -1 for anything else.
 static const uint16_t kPolishLetters[] = {0x104, 0x106, 0x118, 0x141, 0x143, 0xd3,  0x15a, 0x179, 0x17b,   // ĄĆĘŁŃÓŚŹŻ
-                                          0x105, 0x107, 0x119, 0x142, 0x144, 0xf3, 0x15b, 0x17a, 0x17c};  // ąćęłńóśźż
+                                          0x105, 0x107, 0x119, 0x142, 0x144, 0xf3, 0x15b, 0x17a, 0x17c,   // ąćęłńóśźż
+                                          // Spanish (the third language): ÁÉÍÚÑ áéíúñ ¡¿ - after the Polish ones, so
+                                          // every slot the Polish letters had stays where it was
+                                          0xc1, 0xc9, 0xcd, 0xda, 0xd1, 0xe1, 0xe9, 0xed, 0xfa, 0xf1, 0xa1, 0xbf};
 static const int kGlyphSlots = 128 + int(sizeof(kPolishLetters) / sizeof(kPolishLetters[0]));
 
 inline int glyphSlot(uint32_t codepoint)

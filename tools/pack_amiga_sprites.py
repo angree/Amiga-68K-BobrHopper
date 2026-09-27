@@ -333,8 +333,12 @@ def seal_floor_edge(img, e, grow=1):
     return out
 
 
+DITHER_STRENGTH = 0.5  # the author: "za duzo ditheringu" at full error diffusion - half of it looks cleaner
+
+
 def dither_to(img, palette, first):
-    """Floyd-Steinberg onto palette[first:]; transparent stays 0. For the logo on a 64-pen EHB screen."""
+    """Floyd-Steinberg onto palette[first:], carrying DITHER_STRENGTH of the error; transparent stays 0. For the
+    logo on a 64-pen EHB screen."""
     w, h = img.size
     px = img.load()
     err = [[0.0, 0.0, 0.0] for _ in range(w * h)]
@@ -354,7 +358,8 @@ def dither_to(img, palette, first):
                     bi, bd = i, d
             out[y * w + x] = bi
             c = palette[bi]
-            de = (want[0] - c[0], want[1] - c[1], want[2] - c[2])
+            de = ((want[0] - c[0]) * DITHER_STRENGTH, (want[1] - c[1]) * DITHER_STRENGTH,
+                  (want[2] - c[2]) * DITHER_STRENGTH)
             for dx, dy, f in ((1, 0, 7 / 16.0), (-1, 1, 3 / 16.0), (0, 1, 5 / 16.0), (1, 1, 1 / 16.0)):
                 xx, yy = x + dx, y + dy
                 if 0 <= xx < w and yy < h and px[xx, yy][3] >= 128:

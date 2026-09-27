@@ -3,9 +3,9 @@
 #define BH_FONT_IDS_H
 
 #define BH_FONT_FACES 4
-#define BH_FONT_6    0  /* line height 6 */
-#define BH_FONT_7    1  /* line height 7 */
-#define BH_FONT_9    2  /* line height 9 */
-#define BH_FONT_16   3  /* line height 16 */
+#define BH_FONT_12   0  /* line height 12 */
+#define BH_FONT_14   1  /* line height 14 */
+#define BH_FONT_18   2  /* line height 18 */
+#define BH_FONT_32   3  /* line height 32 */
 
 #endif

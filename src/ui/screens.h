@@ -39,12 +39,14 @@ constexpr int kCharacterCount = 8;
 // what the settings screen edits; saved in conf/crossy.cfg by the app
 struct UserSettings {
     int volume = 10;   // 0..10, sound effects
-    int music = 22;    // percent, 0..100 in steps of 2
+    // 0..10 like the sounds (the author: one scale for both); the platforms play it at music * 10 percent. It was a
+    // percentage in steps of 2 - the config keeps it as music_level now, an old music_volume read once (22 -> 2).
+    int music = 2;
     int shadows = 0;   // 0 full, 1 simple, 2 off
     bool fpsCounter = false;
     int framing = 0;   // 0 normal (view scale 3), 1 wide (3.5)
     int character = 0; // 7.1: index into kCharacters
-    int language = 0;  // O11.5: 0 English, 1 Polish (ui/lang.h)
+    int language = 0;  // O11.5: 0 English, 1 Polish, 2 Spanish, 3 Latin (ui/lang.h)
     // O23: how many play, and which input device each of them uses. The devices are the platform's own - the app
     // hands their names to Screens::controlNames - so this screen works the same on a keyboard and on a console.
     int players = 1;

@@ -114,9 +114,8 @@ void Renderer::drawOverlayImage(const GpuTexture &tex, mreal x, mreal y, mreal w
         bh_blit(surface, sprites, logoSprite, pxs(x, pixelScale) + (pxs(w, pixelScale) - logoW) / 2, pxs(y, pixelScale));
         return;
     }
-    const bool polish = lang::current() == 1;
     const int bx = pxs(x, pixelScale), by = pxs(y, pixelScale), bw = pxs(w, pixelScale), bh = pxs(h, pixelScale);
-    if (tex.id == 2) labelledBox(*this, bx, by, bw, bh, true, "A / FIRE", polish ? "GRAJ" : "PLAY");
+    if (tex.id == 2) labelledBox(*this, bx, by, bw, bh, true, "A / FIRE", lang::t(lang::Play));
     else if (tex.id == 3) labelledBox(*this, bx, by, bw, bh, false, "S / LEFT", lang::t(lang::MenuItem));
     else if (tex.id == 4) labelledBox(*this, bx, by, bw, bh, false, "B / FIRE 2", lang::t(lang::Back));
 }

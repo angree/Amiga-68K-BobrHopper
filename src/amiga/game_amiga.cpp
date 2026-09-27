@@ -111,7 +111,11 @@ inline mreal viewScaleFor(int screenW) // 6 at 320 (the SF2000 framing), 3 at 64
 // palette baked for those 64 - the same pictures, packed differently (build/bake_amiga.sh, tools/pack_amiga_sprites.py).
 inline const char *spritePathFor(bool hires, bool wide, bool ehb = false, int shape = BH_VIEW_FULL)
 {
-    if (ehb) return wide ? "PROGDIR:data/spritesocswide.spr" : "PROGDIR:data/spritesocs.spr";
+    if (ehb) {
+        if (shape == BH_VIEW_NARROW) return wide ? "PROGDIR:data/spritesocsn256wide.spr" : "PROGDIR:data/spritesocsn256.spr";
+        if (shape == BH_VIEW_PHONE) return wide ? "PROGDIR:data/spritesocsn160wide.spr" : "PROGDIR:data/spritesocsn160.spr";
+        return wide ? "PROGDIR:data/spritesocswide.spr" : "PROGDIR:data/spritesocs.spr";
+    }
     if (shape == BH_VIEW_NARROW)
         return hires ? (wide ? "PROGDIR:data/sprites640n512wide.spr" : "PROGDIR:data/sprites640n512.spr")
                      : (wide ? "PROGDIR:data/spritesn256wide.spr" : "PROGDIR:data/spritesn256.spr");
@@ -2093,8 +2097,13 @@ struct Session {
         settings.shadows = getInt("amiga_shadows", 0) ? 1 : 2;
         settings.fpsCounter = getInt("fps_counter", 1) != 0; // ON until the port is accepted: the user watches it
         settings.framing = clampInt(getInt("framing", 0), 0, 1);
-        settings.language = clampInt(getInt("language", 0), 0, 1);
-        settings.music = clampInt(getInt("music_volume", 22), 0, 100);
+        settings.language = clampInt(getInt("language", 0), 0, lang::kLanguages - 1);
+        {
+            // music_level 0..10; a config from before it has music_volume in percent, read once (22 -> 2)
+            int level = getInt("music_level", -1);
+            if (level < 0) level = (getInt("music_volume", 22) + 5) / 10;
+            settings.music = clampInt(level, 0, 10);
+        }
         // O23: how many play and which device each of them uses (kControlNames below)
         settings.players = clampInt(getInt("players", 1), 1, 2);
         settings.control[0] = clampInt(getInt("control_p1", 0), 0, kControlCount - 1);
@@ -2121,7 +2130,7 @@ struct Session {
         setInt("fps_counter", settings.fpsCounter ? 1 : 0);
         setInt("framing", settings.framing);
         setInt("language", settings.language);
-        setInt("music_volume", settings.music);
+        setInt("music_level", settings.music);
         setInt("players", settings.players);
         setInt("control_p1", settings.control[0]);
         setInt("control_p2", settings.control[1]);
@@ -2134,7 +2143,7 @@ struct Session {
     }
     // Paula's volume is 0..64. 22% is the console default and was tuned there; here it maps onto the 32 the
     // streaming music has played at so far, so the default loudness does not change.
-    int musicVolume() const { return clampInt(settings.music * 64 / 44, 0, 64); }
+    int musicVolume() const { return clampInt(settings.music * 10 * 64 / 44, 0, 64); } // level 0..10 = 0..100%
     void applySettings()
     {
         lang::set(settings.language);
@@ -2618,7 +2627,7 @@ int main(void)
     Session session;
     session.loadSettings();
     gWide = session.settings.players > 1 || session.settings.framing == 1;
-    session.shapesAllowed = !displayPrefs.ehb;
+    session.shapesAllowed = true; // every mode has its shape sets now, EHB (OCS/ECS) included
     gView = session.shapeNeeded();
     gViewW = viewWidthFor(gView, displayPrefs.hires != 0);
     const char *spritePath = spritePathFor(displayPrefs.hires != 0, gWide, displayPrefs.ehb != 0, gView);
@@ -3389,15 +3398,13 @@ int main(void)
             session.screens.draw(ui, text, game, uiW, uiH);
             if (quitAsk) {
                 // the question, in a window of the menus' purple over whatever the title shows
-                const bool pl = lang::current() == 1;
                 const Rgba white{1, 1, 1, 1}, black{0, 0, 0, 1};
                 const int bw = 460, bh = 128, bx = (uiW - bw) / 2, by = (uiH - bh) / 2;
                 ui.beginOverlay(uiW, uiH);
                 ui.drawOverlayRect(mreal(bx - 4), mreal(by - 4), mreal(bw + 8), mreal(bh + 8), 0, 0, 0, 1);
                 ui.drawOverlayRect(mreal(bx), mreal(by), mreal(bw), mreal(bh), 0x6A / 255.0f, 0x40 / 255.0f,
                                    0xEB / 255.0f, 1);
-                const std::string q = pl ? "WYJŚĆ Z GRY?" : "QUIT THE GAME?";
-                const std::string h = pl ? "ENTER - TAK     ESC - NIE" : "ENTER - YES     ESC - NO";
+                const std::string q = lang::t(lang::QuitGame), h = lang::t(lang::QuitHint);
                 text.drawOutlined(ui, q, (uiW - text.width(q, 18)) / 2, by + 26, 18, white, 2, black);
                 text.drawOutlined(ui, h, (uiW - text.width(h, 12)) / 2, by + 80, 12, white, 2, black);
                 ui.endOverlay();
