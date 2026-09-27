@@ -54,6 +54,9 @@ struct UserSettings {
     bool askPlayers = false;
     // O24: Progression until it is beaten. A dead player comes back instead of the level ending.
     bool infiniteRespawn = false;
+    // The Amiga's screen shape: 0 the whole screen, 1 narrow, 2 a tall "phone" column - the scene zoomed out with
+    // sprite sets of its own. Only where the platform sets Screens::viewShapes; everywhere else it stays 0, unseen.
+    int shape = 0;
 };
 
 struct MenuResult {
@@ -73,7 +76,7 @@ enum class Menu { None, Pause, Settings };
 // user asked for exactly this ("musimy chyba zrobic przewijane menu"). The order is the order they are shown in.
 enum SettingsItem {
     SetPlayers, SetControl1, SetControl2, SetRespawn, SetSounds, SetMusic, SetView, SetLanguage, SetCharacter,
-    SetShadows, SetFps, SetBack, SetItemCount
+    SetShadows, SetFps, SetBack, SetShape, SetItemCount
 };
 
 class Screens {
@@ -92,6 +95,8 @@ public:
     Menu menu() const { return menu_; }
     // the game must not step: the pause menu, or settings opened from it
     bool pausesGame() const { return menu_ == Menu::Pause || (menu_ == Menu::Settings && settingsFromPause_); }
+    // the restart fade is on screen (the Amiga's narrow views draw such frames on the whole screen)
+    bool fading() const { return fadeTime_ >= real(0); }
     // an open menu or the home screen takes the step's input first; true = consumed, the game must not see it
     bool handleInput(const Input &input, UserSettings &settings, MenuResult &out);
 
@@ -103,6 +108,14 @@ public:
     int careerLevel = 1;
     // shown small in the corner of the home screen when set (the SF2000 build: the user tests by version number)
     std::string versionLabel;
+    // The platform draws the scene in several screen shapes (the Amiga): the settings then offer UserSettings::shape.
+    // Off by default, so a platform that does not set it keeps exactly the settings it always had.
+    bool viewShapes = false;
+    // The title screen's menu gets a third bar, SETTINGS, below Classic and Progression (the Amiga: a keyboard
+    // player should not have to know that S opens them). Off by default - the consoles keep their two bars.
+    bool homeSettings = false;
+    // the title's first page, where there is nothing left to go back to (the Amiga's Esc then leaves the game)
+    bool atHomeTop() const { return homePage_ == HomePage::Modes; }
     // O23: the input devices this platform offers, in the order the settings screen steps through them (for example
     // ARROWS, WSAD, JOY 1, JOY 2). Left null on a platform with one device, and the control entries then vanish.
     const char *const *controlNames = nullptr;
@@ -115,7 +128,7 @@ private:
     void drawSettings(Renderer &renderer, TextRenderer &text, int screenW, int screenH);
     // O11.2: the game over screen's banners, in the home screen's colours, as menu items
     void drawMenuBars(Renderer &renderer, TextRenderer &text, const std::string *labels, int count, int cursor, int w,
-                      int top);
+                      int top, int barH = 48, int gap = 14);
     // O24: the pulsing bar that marks the selected row of the pause and settings lists
     void selectionBar(Renderer &renderer, int w, int y, int size);
     bool handleHome(const Input &input, MenuResult &out);

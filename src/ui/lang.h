@@ -16,6 +16,8 @@ enum Str {
     // O24
     AskOnStart, HowMany, Respawn, HintPlayers,
     HintHome, HintCareer, HintConfirm, HintPause, HintSettings, HintLevelOver,
+    // the Amiga's screen shapes (Screens::viewShapes)
+    ScreenShape, ShapeFull, ShapeNarrow, ShapePhone,
     Count
 };
 

@@ -85,18 +85,39 @@ int gPixelScale = 1;                          // 1 at 320x240, 2 at 640x480: eve
 // scale cannot be stretched on a 68020 without either a blur or a cost; so there are four sets and exactly one of
 // them is in memory. Wide shows 7/6 more world, the same ratio the consoles use (3.0 -> 3.5 in settings.h).
 bool gWide = false;
+// THE NARROW VIEWS (the SCREEN entry of the game's settings): the scene in the middle 256 or 160 columns of the 320 screen,
+// zoomed out by 320/256 or 320/160 so the whole width of a level still fits. Fewer columns to convert (c2p works in
+// 32-pixel columns: 256 of them, or 192 round the 160) and smaller sprites, each with sets of their own. The phone
+// view, zoomed out twice, shows twice as many rows. At 640x480 the same with 512 and 320. Not on OCS (no EHB sets).
+// Switched on the title screen like the wide view: only the one set the shape needs is ever in memory.
+#define BH_VIEW_FULL 0
+#define BH_VIEW_NARROW 1
+#define BH_VIEW_PHONE 2
+int gView = 0;      // BH_VIEW_FULL | BH_VIEW_NARROW | BH_VIEW_PHONE - UserSettings::shape, chosen in the game's settings
+int gViewW = 320;   // the scene's width in pixels
+inline int viewWidthFor(int shape, bool hires) // 320/256/160, or 640/512/320
+{
+    const int full = hires ? 640 : 320;
+    return shape == BH_VIEW_NARROW ? full * 4 / 5 : shape == BH_VIEW_PHONE ? full / 2 : full;
+}
 inline mreal viewScaleFor(int screenW) // 6 at 320 (the SF2000 framing), 3 at 640; times 7/6 when wide
 {
-    const mreal base = mreal(6 * 320 / screenW);
+    const mreal base = gView ? mreal(6 * 320) / mreal(gViewW) : mreal(6 * 320 / screenW); // 7.5 / 12 when narrow
     return gWide ? base * mreal(7) / mreal(6) : base;
 }
 // Which of the four containers a screen size and a framing need. The font does not change: the screens lay
 // themselves out in the same logical pixels either way.
 // O25: and a fifth and sixth for OCS. An EHB screen has 64 pens where AGA has 256, so its sprites carry their own
 // palette baked for those 64 - the same pictures, packed differently (build/bake_amiga.sh, tools/pack_amiga_sprites.py).
-inline const char *spritePathFor(bool hires, bool wide, bool ehb = false)
+inline const char *spritePathFor(bool hires, bool wide, bool ehb = false, int shape = BH_VIEW_FULL)
 {
     if (ehb) return wide ? "PROGDIR:data/spritesocswide.spr" : "PROGDIR:data/spritesocs.spr";
+    if (shape == BH_VIEW_NARROW)
+        return hires ? (wide ? "PROGDIR:data/sprites640n512wide.spr" : "PROGDIR:data/sprites640n512.spr")
+                     : (wide ? "PROGDIR:data/spritesn256wide.spr" : "PROGDIR:data/spritesn256.spr");
+    if (shape == BH_VIEW_PHONE)
+        return hires ? (wide ? "PROGDIR:data/sprites640n320wide.spr" : "PROGDIR:data/sprites640n320.spr")
+                     : (wide ? "PROGDIR:data/spritesn160wide.spr" : "PROGDIR:data/spritesn160.spr");
     return hires ? (wide ? "PROGDIR:data/sprites640wide.spr" : "PROGDIR:data/sprites640.spr")
                  : (wide ? "PROGDIR:data/spriteswide.spr" : "PROGDIR:data/sprites.spr");
 }
@@ -1583,6 +1604,9 @@ struct Session {
     // So the start is held for the frame or two the swap takes. 0 = nothing waiting, otherwise level + 1.
     int pendingStart = 0;
     bool wideNeeded() const { return settings.players > 1 || settings.framing == 1; }
+    bool shapesAllowed = true; // false on OCS: no EHB sets for the narrow shapes
+    int shapeNeeded() const { return shapesAllowed ? settings.shape : BH_VIEW_FULL; }
+    bool swapNeeded() const { return wideNeeded() != gWide || shapeNeeded() != gView; }
     bool goArmA = false, goArmMenu = false, pendingClassic = false;
 
     // ---- the config: key=value lines next to the binary. stdio only (C++ streams never close on this libc), and
@@ -1667,6 +1691,7 @@ struct Session {
             settings.control[1] = (settings.control[0] + 1) % kControlCount;
         settings.askPlayers = getInt("ask_players", 0) != 0;
         settings.infiniteRespawn = getInt("infinite_respawn", 0) != 0;
+        settings.shape = clampInt(getInt("view_shape", 0), 0, 2);
         const std::string character = conf.count("character") ? conf["character"] : std::string("beaver");
         for (int i = 0; i < kShippedCharacters; i++)
             if (character == kCharacters[i].id) settings.character = i;
@@ -1690,6 +1715,7 @@ struct Session {
         setInt("control_p2", settings.control[1]);
         setInt("ask_players", settings.askPlayers ? 1 : 0);
         setInt("infinite_respawn", settings.infiniteRespawn ? 1 : 0);
+        setInt("view_shape", settings.shape);
         conf["character"] = kCharacters[settings.character].id;
         if (game && game->highscore() > getInt("highscore", 0)) setInt("highscore", game->highscore());
         saveConf();
@@ -1758,12 +1784,12 @@ struct Session {
         }
         if (menu.quitToHome) g.quitToHome();
         if (menu.exitGame) quit = true;
-        if (menu.startLevel >= 0 && !g.restarting() && wideNeeded() != gWide) {
+        if (menu.startLevel >= 0 && !g.restarting() && swapNeeded()) {
             // the set has to change first; the main loop does that on the title screen and this starts below
             pendingStart = menu.startLevel + 1;
             menu.startLevel = -1;
         }
-        if (pendingStart > 0 && wideNeeded() == gWide && !g.restarting()) {
+        if (pendingStart > 0 && !swapNeeded() && !g.restarting()) {
             menu.startLevel = pendingStart - 1;
             pendingStart = 0;
         }
@@ -1863,7 +1889,7 @@ struct Session {
 //   cursor keys        move / menu
 //   A, Space, Return   A      (choose, hop forward)
 //   B, Backspace       B      (back)
-//   P, Esc             START  (pause)
+//   P                  START  (pause)      Esc: back one step - B, START in play (see the event loop)
 //   S, Tab             SELECT (settings, from the title and the game-over screen)
 uint16_t buttonForKey(int raw)
 {
@@ -2061,6 +2087,7 @@ struct AutoPlay {
     uint16_t maskPrev;
     bool progression = false, wentDown = false;
     bool menuWalk = false; // "menu" in autoplay.txt: open the settings and step down the list, for screenshots
+    bool viewWalk = false; // "view": open the settings, step to SCREEN, one press right, back - the shape swap
     bool soloKeys = false; // "solo" in autoplay.txt: press the arrows only, and see that player two stays put
     bool askShot = false;  // "ask" in autoplay.txt: one press of A on the title, then nothing
     bool god = false;      // "god": the classic bot, and nothing kills the hero - one long game to measure
@@ -2077,6 +2104,7 @@ struct AutoPlay {
                 // "menu" walks the SETTINGS list instead of playing: the screens at 640x480 had never been looked
                 // at, and there is no way to press a key from the host (that once typed into the user's browser).
                 if (word[0] == 'm') menuWalk = true;
+                if (word[0] == 'v') viewWalk = true;
                 // "solo" presses ONLY the arrows, exactly as a person at the keyboard would - the shared mask and
                 // the arrows device together, the WSAD device untouched. With two players only player one may
                 // move. It exists because the user found the opposite by playing, and no unattended run could
@@ -2088,7 +2116,7 @@ struct AutoPlay {
                 if (word[0] == 'g') god = true;
             }
             fclose(f);
-            on = !menuWalk && !soloKeys && !askShot;
+            on = !menuWalk && !soloKeys && !askShot && !viewWalk;
             scripted = 1; // one press of A, to get past the title screen into a game
             printf("game: autoplay is on - %s\n",
                    menuWalk ? "walking the settings list" : progression ? "hopping by itself (PROGRESSION)"
@@ -2171,7 +2199,10 @@ int main(void)
     Session session;
     session.loadSettings();
     gWide = session.settings.players > 1 || session.settings.framing == 1;
-    const char *spritePath = spritePathFor(displayPrefs.hires != 0, gWide, displayPrefs.ehb != 0);
+    session.shapesAllowed = !displayPrefs.ehb;
+    gView = session.shapeNeeded();
+    gViewW = viewWidthFor(gView, displayPrefs.hires != 0);
+    const char *spritePath = spritePathFor(displayPrefs.hires != 0, gWide, displayPrefs.ehb != 0, gView);
     const char *const fontPath = displayPrefs.hires ? "PROGDIR:data/font640.bhf" : "PROGDIR:data/font.bhf";
     printf("sprites: %s (%s view, %d player%s)\n", spritePath, gWide ? "wide" : "normal", session.settings.players,
            session.settings.players > 1 ? "s" : "");
@@ -2181,6 +2212,8 @@ int main(void)
         // game starts in the normal view rather than refusing to run.
         printf("sprites: %s missing - falling back to the normal view\n", spritePath);
         gWide = false;
+        gView = BH_VIEW_FULL;
+        gViewW = viewWidthFor(gView, displayPrefs.hires != 0);
         spritePath = spritePathFor(displayPrefs.hires != 0, false, displayPrefs.ehb != 0);
         if (!bh_sprites_load(&sprites, spritePath)) return 20;
     }
@@ -2232,6 +2265,27 @@ int main(void)
     surface.pitch = amigagfx_pitch();
     surface.width = amigagfx_game_width();
     surface.height = amigagfx_game_height();
+    // THE SCENE'S OWN SURFACE: all of the screen, or its middle gViewW columns in a narrow view. The blit then
+    // converts only the 32-pixel columns that hold it while the game is played; menus still use the whole screen.
+    BHSurface view = surface;
+    int viewX = 0, blitX0 = 0, blitX1 = surface.width;
+    bool lastBlitFull = true;
+    auto setupView = [&]() {
+        view = surface;
+        viewX = 0;
+        blitX0 = 0;
+        blitX1 = surface.width;
+        lastBlitFull = true;
+        if (gViewW < surface.width) {
+            viewX = (surface.width - gViewW) / 2;
+            view.pixels = surface.pixels + viewX;
+            view.width = gViewW;
+            blitX0 = viewX & ~31;
+            blitX1 = (viewX + gViewW + 31) & ~31;
+        }
+        printf("view: %d columns at x=%d, converted while playing: %d..%d\n", view.width, viewX, blitX0, blitX1);
+    };
+    setupView();
 
     Game game(models, 1);
     game.context().foam = false; // see GameContext::foam - half the logic step, for squares at the screen's edge
@@ -2246,7 +2300,7 @@ int main(void)
     game.init();
 
     AmigaRenderer renderer;
-    if (!renderer.init(&sprites, models, surface.width, surface.height)) {
+    if (!renderer.init(&sprites, models, view.width, view.height)) {
         printf("bobrhopper: no sprites matched the models\n");
         amigagfx_close();
         bh_sprites_free(&sprites);
@@ -2299,6 +2353,8 @@ int main(void)
     session.screens.playSound = [&board](const std::string &name) { board.play(name); };
     // O23: the devices this machine offers, so the settings screen can hand one to each player
     session.screens.controlNames = Session::controlNames();
+    session.screens.viewShapes = session.shapesAllowed;
+    session.screens.homeSettings = true; // a third bar on the title: SETTINGS
     session.screens.controlCount = Session::kControlCount;
     game.setHighscore(session.getInt("highscore", 0));
     game.setCharacter(kCharacters[session.settings.character].id);
@@ -2618,6 +2674,18 @@ int main(void)
                     queued.push_back(snap);
                 }
     }
+    if (autoplay.viewWalk) {
+        // Select, Down to SCREEN (from Players: P1 control, Respawn, Sounds, Music, View, Screen - six), Right, then B
+        // back to the title - where the new shape's set is loaded. Held 20 frames, released 20, like the walk above.
+        const uint16_t script[] = {0, ActSelect, 0, ActDown, 0, ActDown, 0, ActDown, 0, ActDown, 0, ActDown, 0,
+                                   ActDown, 0, 0, 0, ActRight, 0, 0, 0, ActB, 0};
+        for (unsigned i = 0; i < sizeof(script) / sizeof(script[0]); i++)
+            for (int hold = 0; hold < 20; hold++) {
+                Snapshot snap;
+                for (int d = 0; d < 5; d++) snap.mask[d] = script[i];
+                queued.push_back(snap);
+            }
+    }
     if (autoplay.on && autoplay.progression) {
         // Progression from the title: down, A (the career page), A again (Continue) - then the bot takes over.
         // Down to Progression, A, then A again for Continue. O24: when the settings ask how many play, that
@@ -2657,14 +2725,21 @@ int main(void)
                 windowClosed = true;
             } else if (ev.type == AMIGAGFX_EV_KEY) {
                 const int raw = ev.code & 0x7F;
-                // ESC ON THE TITLE SCREEN LEAVES THE GAME - the title had no way out at all. Everywhere else Esc
-                // is START (pause), and the pause menu has its own Exit.
+                // ESC GOES BACK ONE STEP - the author's rule. On the title's first page there is no step left, so
+                // it leaves the game; in play it opens the pause menu (back from the game); everywhere else - the
+                // settings, the pause menu, the game-over screen, the title's inner pages - it is B.
                 if (raw == 0x45 && (ev.code & 0x80) == 0 && game.state() == GameState::None &&
-                    session.screens.menu() == Menu::None) {
+                    session.screens.menu() == Menu::None && session.screens.atHomeTop()) {
                     session.quit = true;
                     continue;
                 }
-                const uint16_t button = buttonForKey(raw);
+                uint16_t button = buttonForKey(raw);
+                if (raw == 0x45) {
+                    const bool inPlay = game.state() == GameState::Playing && session.screens.menu() == Menu::None;
+                    // a release lets go of both, so a key pressed in play (START) and let go in the pause menu (B)
+                    // can never stay held
+                    button = (ev.code & 0x80) ? uint16_t(ActStart | ActB) : uint16_t(inPlay ? ActStart : ActB);
+                }
                 const uint16_t arrows = arrowsForKey(raw), wasd = wasdForKey(raw);
                 if (!button && !arrows && !wasd) continue;
                 if (ev.code & 0x80) {
@@ -2773,9 +2848,10 @@ int main(void)
         // or so it takes on a hard disk is covered by a line on screen rather than a frozen picture.
         {
             const bool wantWide = session.settings.players > 1 || session.settings.framing == 1;
-            if (wantWide != gWide && game.state() == GameState::None && session.screens.menu() == Menu::None &&
-                !game.restarting()) {
-                const char *want = spritePathFor(displayPrefs.hires != 0, wantWide, displayPrefs.ehb != 0);
+            const int wantShape = session.shapeNeeded();
+            if ((wantWide != gWide || wantShape != gView) && game.state() == GameState::None &&
+                session.screens.menu() == Menu::None && !game.restarting()) {
+                const char *want = spritePathFor(displayPrefs.hires != 0, wantWide, displayPrefs.ehb != 0, wantShape);
                 bh_fill_rect(&surface, 0, 0, surface.width, surface.height, BH_SKY_INDEX);
                 if (font.faceCount > 0) {
                     const char *msg = "LOADING";
@@ -2789,15 +2865,19 @@ int main(void)
                     bh_sprites_free(&sprites);
                     sprites = next;
                     gWide = wantWide;
+                    gView = wantShape;
+                    gViewW = viewWidthFor(gView, displayPrefs.hires != 0);
+                    setupView();
                     amigagfx_set_palette(sprites.palette, 0, kPens);
                     if (displayPrefs.ehb) amigagfx_set_ehb_palette(sprites.palette);
-                    renderer.init(&sprites, models, surface.width, surface.height);
+                    renderer.init(&sprites, models, view.width, view.height);
                     printf("sprites: swapped to %s\n", want);
                 } else {
                     // Nothing was freed, so the game carries on with the set it has and says so once.
                     printf("sprites: cannot load %s - staying on the %s set\n", want, gWide ? "wide" : "normal");
                     session.settings.players = 1;
                     session.settings.framing = 0;
+                    session.settings.shape = gView; // a set that is not there: stay in the shape we have
                 }
                 needRedraw = true;
             }
@@ -2836,13 +2916,24 @@ int main(void)
             renderer.forceClear();
             needRedraw = false;
         }
-        renderer.render(surface, game);
-        if (bgCheck && frames % 25 == 0) renderer.checkFrame(surface);
+        renderer.render(view, game);
+        if (bgCheck && frames % 25 == 0) renderer.checkFrame(view);
+        // A NARROW FRAME: the scene alone, in play - the HUD goes into the scene's column and only that column is
+        // converted. Anything else (title, menus, game over, the restart fade) is a whole-screen frame, with the
+        // sides painted black first so nothing a menu left there survives it.
+        const bool narrowFrame = view.width < surface.width && game.state() == GameState::Playing &&
+                                 session.screens.menu() == Menu::None && !session.screens.fading();
+        if (view.width < surface.width && !narrowFrame) {
+            bh_fill_rect(&surface, 0, 0, viewX, surface.height, 0);
+            bh_fill_rect(&surface, viewX + view.width, 0, surface.width - viewX - view.width, surface.height, 0);
+        }
         profRender += profMicros() - tRender0;
         const unsigned long tUi0 = profMicros();
         if (!compare.on) {
             // the shared layout is 640x480 logical pixels, drawn at half size - so it is told twice our height
-            const int uiW = surface.width * 2 / gPixelScale, uiH = surface.height * 2 / gPixelScale;
+            if (narrowFrame) ui.surface = &view;
+            const BHSurface &uiSurface = narrowFrame ? view : surface;
+            const int uiW = uiSurface.width * 2 / gPixelScale, uiH = uiSurface.height * 2 / gPixelScale;
             // The title's bottom-right corner (the consoles' version label) says how to leave: Esc.
             {
                 static int labelLanguage = -1;
@@ -2855,9 +2946,21 @@ int main(void)
             drawHud(ui, text, game, uiW, uiH);
             session.screens.draw(ui, text, game, uiW, uiH);
         }
+        ui.surface = &surface;
         profUi += profMicros() - tUi0;
         const unsigned long tBlit0 = profMicros();
-        amigagfx_blit(0, 0, gScreenW, gScreenH);
+        if (narrowFrame && !lastBlitFull) {
+            amigagfx_blit(blitX0, 0, blitX1 - blitX0, gScreenH);
+        } else {
+            // the first narrow frame after a whole one still converts everything: the black sides must reach the
+            // screen once, over whatever the menu left there
+            if (narrowFrame) {
+                bh_fill_rect(&surface, 0, 0, viewX, surface.height, 0);
+                bh_fill_rect(&surface, viewX + view.width, 0, surface.width - viewX - view.width, surface.height, 0);
+            }
+            amigagfx_blit(0, 0, gScreenW, gScreenH);
+        }
+        lastBlitFull = !narrowFrame;
         profBlit += profMicros() - tBlit0;
         frames++;
         {
@@ -2865,9 +2968,24 @@ int main(void)
             static unsigned long fpsMark = 0, fpsFrames = 0;
             if (fpsMark == 0) fpsMark = now;
             if (now - fpsMark >= 1000UL && session.settings.fpsCounter) {
-                static char bar[64];
+                static char bar[80];
                 const unsigned long span = now - fpsMark, f10 = ((frames - fpsFrames) * 10000UL) / span;
-                snprintf(bar, sizeof(bar), "Bobr Hopper 68k " BH_VERSION "   %lu.%lu FPS", f10 / 10UL, f10 % 10UL);
+                // THE AVERAGE OVER THE LAST 40 SECONDS, next to the last second's number: one second jumps with what
+                // is on screen, and the author wants a number that can be quoted without making it up.
+                static unsigned long secFrames[40], secMs[40];
+                static int secAt = 0, secFilled = 0;
+                secFrames[secAt] = frames - fpsFrames;
+                secMs[secAt] = span;
+                secAt = (secAt + 1) % 40;
+                if (secFilled < 40) secFilled++;
+                unsigned long sf = 0, sm = 0;
+                for (int k = 0; k < secFilled; k++) {
+                    sf += secFrames[k];
+                    sm += secMs[k];
+                }
+                const unsigned long a10 = sm ? sf * 10000UL / sm : 0UL;
+                snprintf(bar, sizeof(bar), "Bobr Hopper " BH_VERSION " %lu.%lu FPS AVG%d %lu.%lu", f10 / 10UL,
+                         f10 % 10UL, secFilled, a10 / 10UL, a10 % 10UL);
                 amigagfx_show_title(bar);
                 fpsMark = now;
                 fpsFrames = frames;

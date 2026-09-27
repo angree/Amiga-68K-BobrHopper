@@ -71,6 +71,10 @@ static const char *const kText[Count][2] = {
     {"A SELECT   B RESUME", "A WYBIERZ   B WRÓĆ DO GRY"},
     {"LEFT RIGHT CHANGE   A SELECT   B BACK", "LEWO PRAWO ZMIEŃ   A WYBIERZ   B POWRÓT"},
     {"A CONTINUE   B MENU", "A KONTYNUUJ   B MENU"},
+    {"SCREEN", "EKRAN"},
+    {"FULL", "PEŁNY"},
+    {"NARROW", "WĄSKI"},
+    {"PHONE", "TELEFON"},
 };
 
 static int g_language = 0;

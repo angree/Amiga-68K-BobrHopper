@@ -98,6 +98,13 @@ for w in spritesocs.spr spritesocswide.spr; do
     [ -f "$REPO/data_amiga/$w" ] || { echo "no data_amiga/$w - run sh build/bake_amiga.sh ocs ocswide"; exit 1; }
     cp "$REPO/data_amiga/$w" "$STAGE/data/"
 done
+# The SCREEN shapes (the game's settings: NARROW, PHONE): the scene in a narrower column, zoomed out, each with its
+# own sets - normal and wide, 320x240 and 640x480. Loaded one at a time, like every other set.
+for w in spritesn256.spr spritesn256wide.spr spritesn160.spr spritesn160wide.spr \
+         sprites640n512.spr sprites640n512wide.spr sprites640n320.spr sprites640n320wide.spr; do
+    [ -f "$REPO/data_amiga/$w" ] || { echo "no data_amiga/$w - run sh build/bake_amiga.sh"; exit 1; }
+    cp "$REPO/data_amiga/$w" "$STAGE/data/"
+done
 [ -f "$REPO/data_amiga/sounds.bhs" ] && cp "$REPO/data_amiga/sounds.bhs" "$STAGE/data/"
 cp "$REPO/data_amiga/manifest.txt" "$STAGE/data/"
 cp "$REPO/data_amiga/meshes/"*.fmesh "$STAGE/data/meshes/"
@@ -137,8 +144,18 @@ SETTINGS BEFORE THE GAME STARTS - BobrHopperPrefs
   From a Shell: BobrHopperPrefs GFX=RTG SCREEN=640x480 BAR=OFF   (SHOW prints them)
                 BobrHopperPrefs GFX=OCS                          for a machine without AGA
   Everything else (sound, music, language, character, two players, ...) is in the
-  game's own settings screen: press S on the title screen. The list scrolls - a
-  small triangle appears when there is more above or below.
+  game's own settings screen: SETTINGS on the title screen, or press S. The list
+  scrolls - a small triangle appears when there is more above or below.
+
+SCREEN SHAPE (in the game's settings)
+  FULL     the whole screen, as before
+  NARROW   the middle 4/5 of the screen, zoomed out a little - the author's pick:
+           less to convert to bitplanes, the same game
+  PHONE    a tall column half the width, zoomed out twice - you see twice as many
+           rows ahead. A different way to play
+  Each shape has its own graphics, loaded on the title screen (LOADING for a
+  moment) - only one set is ever in memory. AGA and RTG, 320x240 and 640x480;
+  not in the OCS/ECS mode.
 
 TWO PLAYERS
   Settings -> Players -> 2 PLAYERS, then give each player a device of its own:
@@ -162,9 +179,11 @@ CONTROLS
                  keyboard              joystick / CD32 pad
   hop            cursor keys           stick (the hop happens when you let go)
   A  (choose)    A, Space, Return      fire (red)
-  B  (back)      B, Backspace          2nd button (blue) - in menus
+  B  (back)      B, Backspace, Esc     2nd button (blue) - in menus
   pause          P, Esc                2nd button during play, PLAY on a CD32 pad
   settings (S)   S, Tab                green
+  Esc always goes back one step: out of a menu, out of the settings, from the game
+  to the pause menu - and from the title screen out of the game.
   quit           Esc on the title screen, or Exit in the pause menu
 
   After a game:  A / fire = play again,  S / stick left = back to the menu.

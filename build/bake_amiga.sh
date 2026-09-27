@@ -73,6 +73,34 @@ ocswide|all)    bake_one ocswide   7   1024 384 spritesocswide.spr 1 172 1 ;;
 esac
 
 # every set must name the same sprites in the same order, or one compiled table cannot serve them all
+# NARROW VIEWS (VIEW=NARROW|PHONE in BobrHopperPrefs): the scene in a 256- or 160-pixel column of the 320 screen,
+# zoomed out so the whole width of the level still fits - 320/256 and 320/160 times the normal scale. Fewer
+# columns go through c2p and the sprites are smaller; the phone view shows twice as many rows. 8-bit sets only.
+case "$WHICH" in
+narrow|all)     bake_one narrow     7.5  1024 384 spritesn256.spr     1 172 ;;
+esac
+case "$WHICH" in
+narrowwide|all) bake_one narrowwide 8.75 1024 384 spritesn256wide.spr 1 172 ;;
+esac
+case "$WHICH" in
+phone|all)      bake_one phone      12   1024 384 spritesn160.spr     1 172 ;;
+esac
+case "$WHICH" in
+phonewide|all)  bake_one phonewide  14   1024 384 spritesn160wide.spr 1 172 ;;
+esac
+# ...and the same two views at 640x480 (RTG): 512 and 320 columns of the 640 screen.
+case "$WHICH" in
+hnarrow|all)     bake_one hnarrow     3.75  2048 768 sprites640n512.spr     2 344 ;;
+esac
+case "$WHICH" in
+hnarrowwide|all) bake_one hnarrowwide 4.375 2048 768 sprites640n512wide.spr 2 344 ;;
+esac
+case "$WHICH" in
+hphone|all)      bake_one hphone      6     2048 768 sprites640n320.spr     2 344 ;;
+esac
+case "$WHICH" in
+hphonewide|all)  bake_one hphonewide  7     2048 768 sprites640n320wide.spr 2 344 ;;
+esac
 first=""
 for h in out/check/amiga/ids/*.h; do
     case "$h" in *ui_colours.h) continue ;; esac

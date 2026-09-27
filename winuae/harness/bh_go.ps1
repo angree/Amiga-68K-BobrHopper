@@ -25,7 +25,7 @@ param(
   # sat down to play a build I had tested, and got a second player moving by itself, long freezes every so often,
   # and a game that quit after half a minute. Every one of those was my leftover file, not the game. So a plain
   # start now CLEARS it, and a bot run has to ask for one by name.
-  [ValidateSet("", "classic", "prog", "menu", "solo", "ask", "god")]
+  [ValidateSet("", "classic", "prog", "menu", "solo", "ask", "god", "view")]
   [string]$Auto = ""
 )
 
