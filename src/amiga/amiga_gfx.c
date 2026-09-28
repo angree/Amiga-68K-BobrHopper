@@ -1613,14 +1613,34 @@ int amigagfx_dump_screen(const char *path, const char *palpath)
 int amigagfx_game_width(void) { return g_width; }
 int amigagfx_game_height(void) { return g_height; }
 
+/* Night mode (amigagfx_set_tint): the last palette the game loaded, untinted, so a new tint can be applied to it
+ * without the game handing it over again. */
+static UBYTE g_pal_src[256 * 3];
+static int   g_pal_top = 0;                     /* entries 0..g_pal_top-1 of g_pal_src are valid */
+static int   g_tint[3] = {256, 256, 256};
+
+void amigagfx_set_tint(int r256, int g256, int b256)
+{
+	g_tint[0] = r256; g_tint[1] = g256; g_tint[2] = b256;
+	if (g_pal_top > 0) amigagfx_set_palette(g_pal_src, 0, g_pal_top);
+}
+
 void amigagfx_set_palette(const unsigned char *rgb, int first, int count)
 {
 	ULONG table[1 + 256 * 3 + 1];
+	UBYTE tinted[256 * 3];
 	int i;
 
 	if ((g_screen == NULL && !g_win_mode) || count <= 0) return;
 	if (first < 0) first = 0;
 	if (first + count > 256) count = 256 - first;
+
+	if (rgb != g_pal_src + first * 3) memcpy(g_pal_src + first * 3, rgb, (size_t)count * 3);
+	if (first + count > g_pal_top) g_pal_top = first + count;
+	if (g_tint[0] != 256 || g_tint[1] != 256 || g_tint[2] != 256) {
+		for (i = 0; i < count * 3; i++) tinted[i] = (UBYTE)(((int)rgb[i] * g_tint[i % 3]) >> 8);
+		rgb = tinted;
+	}
 
 	table[0] = ((ULONG)count << 16) | (ULONG)first;
 	for (i = 0; i < count; i++) {

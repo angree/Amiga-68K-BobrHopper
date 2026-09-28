@@ -37,6 +37,7 @@
 #include "ui/hud.h"
 #include "ui/lang.h"
 #include "ui/controls.h"
+#include "ui/night.h"
 #include "ui/screens.h" // THE SHARED SCREENS: banners, pause, settings, career, ranks - unchanged
 
 extern "C" {
@@ -2113,6 +2114,7 @@ struct Session {
         settings.askPlayers = getInt("ask_players", 0) != 0;
         settings.infiniteRespawn = getInt("infinite_respawn", 0) != 0;
         settings.shape = clampInt(getInt("view_shape", 0), 0, 2);
+        settings.night = clampInt(getInt("night_mode", 0), 0, 3);
         const std::string character = conf.count("character") ? conf["character"] : std::string("beaver");
         for (int i = 0; i < kShippedCharacters; i++)
             if (character == kCharacters[i].id) settings.character = i;
@@ -2137,6 +2139,7 @@ struct Session {
         setInt("ask_players", settings.askPlayers ? 1 : 0);
         setInt("infinite_respawn", settings.infiniteRespawn ? 1 : 0);
         setInt("view_shape", settings.shape);
+        setInt("night_mode", settings.night);
         conf["character"] = kCharacters[settings.character].id;
         if (game && game->highscore() > getInt("highscore", 0)) setInt("highscore", game->highscore());
         saveConf();
@@ -2150,6 +2153,9 @@ struct Session {
         if (game) game->setInfiniteRespawn(settings.infiniteRespawn); // O24: Progression until it is beaten
         if (board) board->master = settings.volume;
         if (haveSounds) bh_music_volume(musicVolume());
+        // Night mode (ui/night.h): the registers are tinted; the game's palette is not.
+        const NightTint tint = nightTint(settings.night);
+        amigagfx_set_tint(tint.r, tint.g, tint.b);
         // Shadows and View are kept as entries so the screen is the same seven lines as on the consoles; the
         // sprites are baked for one framing and carry no cast shadows, so neither changes the picture yet.
     }

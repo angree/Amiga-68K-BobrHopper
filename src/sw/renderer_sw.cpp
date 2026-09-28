@@ -273,6 +273,33 @@ void Renderer::beginOverlay(int screenW, int screenH)
 
 void Renderer::endOverlay() {}
 
+void Renderer::tintScreen(int, int, int r256, int g256, int b256)
+{
+    if (r256 >= 256 && g256 >= 256 && b256 >= 256) return;
+    // one table per channel, already shifted into place: three lookups and two ORs a pixel (~1 ms a frame on the
+    // SF2000), rebuilt only when the tint changes
+    static uint16_t tr[32], tg[64], tb[32];
+    static int builtR = -1, builtG = -1, builtB = -1;
+    if (r256 != builtR || g256 != builtG || b256 != builtB) {
+        for (int i = 0; i < 32; i++) {
+            tr[i] = uint16_t(((i * r256) >> 8) << 11);
+            tb[i] = uint16_t((i * b256) >> 8);
+        }
+        for (int i = 0; i < 64; i++) tg[i] = uint16_t(((i * g256) >> 8) << 5);
+        builtR = r256;
+        builtG = g256;
+        builtB = b256;
+    }
+    const int stride = raster_.rowStride();
+    for (int y = 0; y < raster_.height; y++) {
+        uint16_t *p = raster_.color + y * stride;
+        for (int x = 0; x < raster_.width; x++) {
+            const unsigned c = p[x];
+            p[x] = uint16_t(tr[c >> 11] | tg[(c >> 5) & 63] | tb[c & 31]);
+        }
+    }
+}
+
 namespace {
 
 // src over dst in 8 bits per channel (the GLES RGBA8 blend), stored as RGB565

@@ -87,6 +87,8 @@ public:
     // solid rectangle: banners, tints, screen fades
     void drawOverlayRect(float x, float y, float w, float h, float r, float g, float b, float a);
     void endOverlay();
+    // night mode (ui/night.h): the finished frame multiplied per channel by r/g/b out of 256
+    void tintScreen(int screenW, int screenH, int r256, int g256, int b256);
 
     GpuMesh unitBox;   // BoxGeometry(1, 1, 1)
     GpuMesh unitPlane; // PlaneGeometry(1, 1): XY plane facing +Z

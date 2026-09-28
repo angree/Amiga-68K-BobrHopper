@@ -81,6 +81,7 @@ static const char *const kText[Count][4] = {
     {"PLAY", "GRAJ", "JUGAR", "LUDE"},
     {"QUIT THE GAME?", "WYJŚĆ Z GRY?", "¿SALIR DEL JUEGO?", "LUDUM RELINQUERE?"},
     {"ENTER - YES     ESC - NO", "ENTER - TAK     ESC - NIE", "ENTER - SÍ     ESC - NO", "ENTER - ITA     ESC - NON"},
+    {"NIGHT MODE", "TRYB NOCNY", "MODO NOCHE", "MODUS NOCTIS"},
 };
 
 static int g_language = 0;

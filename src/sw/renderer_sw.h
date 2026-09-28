@@ -105,6 +105,9 @@ public:
     void drawOverlayImage(const GpuTexture &tex, mreal x, mreal y, mreal w, mreal h, mreal alpha = 1);
     void drawOverlayRect(mreal x, mreal y, mreal w, mreal h, mreal r, mreal g, mreal b, mreal a);
     void endOverlay();
+    // night mode (ui/night.h): the finished frame multiplied per channel by r/g/b out of 256; the screen size is
+    // there for the GLES signature - the whole viewport is tinted
+    void tintScreen(int screenW, int screenH, int r256, int g256, int b256);
 
     // O7.7: an overlay drawn once and then replayed (TextRenderer::drawOutlined on the SF2000). Between
     // beginOverlayCapture and endOverlayCapture the overlay writes into the capture instead of the target. A capture is

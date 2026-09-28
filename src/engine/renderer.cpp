@@ -356,6 +356,15 @@ void Renderer::drawOverlayRect(float x, float y, float w, float h, float r, floa
     drawOverlayTriangles(whiteTexture_, overlayScratch_, r, g, b, a, false);
 }
 
+void Renderer::tintScreen(int screenW, int screenH, int r256, int g256, int b256)
+{
+    if (r256 >= 256 && g256 >= 256 && b256 >= 256) return;
+    beginOverlay(screenW, screenH);
+    glBlendFunc(GL_ZERO, GL_SRC_COLOR); // dst *= colour
+    drawOverlayRect(0, 0, float(screenW), float(screenH), r256 / 256.0f, g256 / 256.0f, b256 / 256.0f, 1);
+    endOverlay();
+}
+
 void Renderer::endOverlay()
 {
     glDisable(GL_BLEND);

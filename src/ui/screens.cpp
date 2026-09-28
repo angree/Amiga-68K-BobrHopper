@@ -211,6 +211,7 @@ bool Screens::handleInput(const Input &in, UserSettings &s, MenuResult &out)
     case SetFps: s.fpsCounter = !s.fpsCounter; break;
     case SetView: s.framing = 1 - s.framing; break;
     case SetShape: s.shape = (s.shape + dir + 3) % 3; break;
+    case SetNight: s.night = (s.night + dir + 4) % 4; break;
     // O11.5: the language of the whole UI, in place of the battery saver the user asked to drop
     case SetLanguage: // English, Polish, Spanish, Latin, round
         s.language = (s.language + dir + lang::kLanguages) % lang::kLanguages;
@@ -387,6 +388,7 @@ int Screens::settingsItems(const UserSettings &s, SettingsItem *out) const
     out[n++] = SetLanguage;
     out[n++] = SetCharacter;
     out[n++] = SetShadows;
+    out[n++] = SetNight;
     out[n++] = SetFps;
     out[n++] = SetBack;
     return n;
@@ -414,6 +416,7 @@ lang::Str Screens::settingsLabel(SettingsItem item)
     case SetLanguage: return lang::Language;
     case SetCharacter: return lang::Character;
     case SetShadows: return lang::Shadows;
+    case SetNight: return lang::NightMode;
     case SetFps: return lang::FpsCounter;
     default: return lang::Back;
     }
@@ -453,6 +456,10 @@ std::string Screens::settingsValue(SettingsItem item, const UserSettings &s) con
         if (simpleShadowsOnly) return lang::t(s.shadows == 2 ? lang::Off : lang::Simple);
         return lang::t(shadowNames[std::max(0, std::min(2, s.shadows))]);
     case SetFps: return lang::t(s.fpsCounter ? lang::On : lang::Off);
+    case SetNight: {
+        static const char *const kelvin[] = {"", "4200 K", "2700 K", "1900 K"};
+        return s.night <= 0 || s.night > 3 ? lang::t(lang::Off) : kelvin[s.night];
+    }
     default: return std::string();
     }
 }

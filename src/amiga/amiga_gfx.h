@@ -177,6 +177,10 @@ int amigagfx_pitch(void);
 /* rgb points at count*3 bytes. */
 void amigagfx_set_palette(const unsigned char *rgb, int first, int count);
 
+/* Night mode: every palette load from now on is multiplied by r/g/b (256 = unchanged), and the palette already
+ * on screen is reloaded through it at once. The game's own tables stay untouched - only the registers see it. */
+void amigagfx_set_tint(int r256, int g256, int b256);
+
 /* Hand this file a private copy of the 64-entry EHB palette (64*3 bytes, the
  * same table the caller loads with amigagfx_set_palette). Only the splash uses
  * it, and only on an EHB screen, where an image carrying its own 256-colour

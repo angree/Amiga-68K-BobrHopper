@@ -20,6 +20,7 @@ enum Str {
     ScreenShape, ShapeFull, ShapeNarrow, ShapePhone,
     // the characters' names (the ones that are words, not names), the Amiga's PLAY box and its quit question
     CharBeaver, CharChicken, CharBacon, Play, QuitGame, QuitHint,
+    NightMode,
     Count
 };
 

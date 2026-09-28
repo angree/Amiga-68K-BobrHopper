@@ -59,6 +59,9 @@ struct UserSettings {
     // The Amiga's screen shape: 0 the whole screen, 1 narrow, 2 a tall "phone" column - the scene zoomed out with
     // sprite sets of its own. Only where the platform sets Screens::viewShapes; everywhere else it stays 0, unseen.
     int shape = 0;
+    // Night mode: the whole picture warmed like a lamp of that colour temperature - 0 off, 1 4200 K, 2 2700 K,
+    // 3 1900 K (a candle). The Amiga filters its palette; the consoles tint what they render.
+    int night = 0;
 };
 
 struct MenuResult {
@@ -78,7 +81,7 @@ enum class Menu { None, Pause, Settings };
 // user asked for exactly this ("musimy chyba zrobic przewijane menu"). The order is the order they are shown in.
 enum SettingsItem {
     SetPlayers, SetControl1, SetControl2, SetRespawn, SetSounds, SetMusic, SetView, SetLanguage, SetCharacter,
-    SetShadows, SetFps, SetBack, SetShape, SetItemCount
+    SetShadows, SetFps, SetBack, SetShape, SetNight, SetItemCount
 };
 
 class Screens {
