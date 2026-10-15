@@ -8,6 +8,7 @@
 //   retro_run (sf2000/audio_retro.cpp), volumes are 16.16.
 #pragma once
 
+#include <cstdio>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -24,6 +25,9 @@ struct stb_vorbis;
 #endif
 
 namespace cr {
+
+// PC --video: a copy of every mixed buffer goes to this file (nullptr stops it); audio_sdl.cpp
+void audioTap(FILE *f);
 
 class Audio {
 public:

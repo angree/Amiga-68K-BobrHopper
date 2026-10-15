@@ -706,6 +706,13 @@ void Game::moveWithDirection(Swipe direction, int player)
     // touching it (user report after v017, the same kind of hole as the train in O10). A hop that starts from a water
     // row with nothing to stand on drowns the hero here instead of carrying on.
     if (interrupted && !ctx_.originalBehaviour) {
+        // The cut-short hop DID land, but its onComplete - the score - died with the animations stopped above, so
+        // a chain of fast hops showed the old score until the hero stood still, and a death inside the chain kept
+        // it for good, game over screen included (bug report from the Amiga forum: a chain of hops at the start
+        // into a car scored 0). Counted here, as the hop's end would have. A chain onto the finish line ends the
+        // level right here too, instead of carrying on past it.
+        updateScore(player);
+        if (levelDone_) return;
         const RowRef *landed = map_->getRow(jsRound(h.position().z));
         if (landed && landed->type == RowType::Water && !landed->water->getRidableForPosition(h.position())) {
             // O24 K4.2: `who` was missing here - this is O12's drowning, written when there was only ever one hero,

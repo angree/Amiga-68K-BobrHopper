@@ -117,7 +117,7 @@ public:
     // Off by default, so a platform that does not set it keeps exactly the settings it always had.
     bool viewShapes = false;
     // The title screen's menu gets a third bar, SETTINGS, below Classic and Progression (the Amiga: a keyboard
-    // player should not have to know that S opens them). Off by default - the consoles keep their two bars.
+    // player should not have to know that S opens them). Every port turns it on now; off by default.
     bool homeSettings = false;
     // The platform has only simple shadows (the Amiga): the Shadows entry offers SIMPLE and OFF, and a stored FULL
     // reads as SIMPLE. Off by default.

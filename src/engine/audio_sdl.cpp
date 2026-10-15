@@ -5,7 +5,14 @@
 
 #include "log.h"
 
+#include <atomic>
+#include <cstdio>
+
 namespace cr {
+
+// --video: the mixed sound is copied here as raw 16-bit mono at Audio::kRate (see audioTap)
+static std::atomic<FILE *> g_tap{nullptr};
+void audioTap(FILE *f) { g_tap = f; }
 
 bool Audio::init(bool openDevice)
 {
@@ -53,6 +60,7 @@ void Audio::unlockDevice()
 void Audio::callback(void *user, uint8_t *stream, int len)
 {
     static_cast<Audio *>(user)->mix(reinterpret_cast<int16_t *>(stream), len / 2);
+    if (FILE *f = g_tap.load()) fwrite(stream, 1, size_t(len), f);
 }
 
 } // namespace cr
